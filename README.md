@@ -350,7 +350,7 @@ See [docs/RELEASE_GUIDE.md](docs/RELEASE_GUIDE.md) for detailed release instruct
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.10+
 - uv package manager
 - GitLab server with API access
 - Personal access token with `read_api` scope

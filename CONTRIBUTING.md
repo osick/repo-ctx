@@ -6,7 +6,7 @@ Thank you for your interest in contributing to repo-ctx!
 
 ### Prerequisites
 
-- Python 3.11 or higher
+- Python 3.10 or higher
 - uv package manager
 - GitLab server access (for testing)
 
