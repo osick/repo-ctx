@@ -37,7 +37,7 @@ Issues = "https://github.com/osick/repo-ctx/issues"
 repo-ctx = "repo_ctx.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["repo-ctx"]
+packages = ["repo_ctx"]
 
 [build-system]
 requires = ["hatchling"]

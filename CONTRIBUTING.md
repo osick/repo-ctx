@@ -43,12 +43,12 @@ Thank you for your interest in contributing to repo-ctx!
 
 3. Run tests:
    ```bash
-   pytest tests/ -v --cov=git_ctx
+   pytest tests/ -v --cov=repo_ctx
    ```
 
 4. Lint your code:
    ```bash
-   ruff check git_ctx/
+   ruff check repo_ctx/
    ```
 
 5. Commit your changes:
@@ -80,7 +80,7 @@ The test workflow will automatically run on your PR.
 pytest tests/
 
 # Run with coverage
-pytest tests/ --cov=git_ctx --cov-report=html
+pytest tests/ --cov=repo_ctx --cov-report=html
 
 # Run specific test
 pytest tests/test_config.py -v
@@ -92,7 +92,7 @@ Place tests in the `tests/` directory:
 
 ```python
 import pytest
-from git_ctx.config import Config
+from repo_ctx.config import Config
 
 def test_config_from_env():
     # Test implementation
@@ -105,10 +105,10 @@ We use `ruff` for linting:
 
 ```bash
 # Check code
-ruff check git_ctx/
+ruff check repo_ctx/
 
 # Format code
-ruff format git_ctx/
+ruff format repo_ctx/
 ```
 
 ## Releasing
@@ -133,7 +133,7 @@ GitHub Actions will automatically:
 
 ```
 repo-ctx/
-├── git_ctx/              # Main package
+├── repo_ctx/            # Main package
 │   ├── __init__.py
 │   ├── __main__.py      # CLI entry point
 │   ├── config.py        # Configuration management
