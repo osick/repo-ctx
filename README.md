@@ -79,7 +79,99 @@ uvx repo-ctx \
 
 ## Usage
 
-### Index a Repository
+### As a Python Library
+
+repo-ctx can be imported and used as a library in your own applications:
+
+```python
+import asyncio
+from repo_ctx.config import Config
+from repo_ctx.core import GitLabContext
+
+async def main():
+    # Initialize
+    config = Config.from_env()
+    context = GitLabContext(config)
+    await context.init()
+
+    # Index a repository
+    await context.index_repository("mygroup", "myproject")
+
+    # Search
+    results = await context.fuzzy_search_libraries("myproject", limit=5)
+    for result in results:
+        print(f"{result.name} (score: {result.score})")
+
+    # Get documentation
+    docs = await context.get_documentation("/mygroup/myproject")
+    print(docs["content"][0]["text"])
+
+asyncio.run(main())
+```
+
+**📚 Library Documentation:**
+- [Quickstart Guide](docs/library/quickstart.md) - Get started in 5 minutes
+- [API Reference](docs/library/api-reference.md) - Complete API documentation
+- [Examples](docs/library/examples.md) - Real-world usage examples
+- [Architecture](docs/library/architecture.md) - How it works internally
+
+### CLI Usage
+
+#### Search for Repositories
+
+```bash
+# Fuzzy search (typo-tolerant)
+uv run repo-ctx search "fastapi"
+
+# Limit results
+uv run repo-ctx search "python" --limit 5
+
+# Search within specific repo
+uv run repo-ctx search "api" --repo mygroup
+```
+
+#### List Indexed Repositories
+
+```bash
+# Detailed view (shows last indexed date)
+uv run repo-ctx list
+
+# Simple view (names only)
+uv run repo-ctx list --format simple
+```
+
+**Example output:**
+```
+Indexed Repositories (3):
+
+1. mygroup/fastapi-project
+   Description: FastAPI microservice for user authentication
+   Default version: main
+   Last indexed: 2025-11-23 14:30:00 (2 hours ago)
+
+2. backend/api-server
+   Description: Main API server
+   Default version: main
+   Last indexed: 2025-11-22 09:15:00 (1 day ago)
+```
+
+#### Get Documentation
+
+```bash
+# Get all documentation
+uv run repo-ctx docs mygroup/project
+
+# Filter by topic
+uv run repo-ctx docs mygroup/project --topic api
+
+# Get specific version
+uv run repo-ctx docs mygroup/project/v1.0.0
+
+# Pagination
+uv run repo-ctx docs mygroup/project --page 2
+```
+
+#### Index a Repository
 
 With environment variables:
 ```bash

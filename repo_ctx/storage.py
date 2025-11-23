@@ -185,6 +185,24 @@ class Storage:
                 tokens=row["tokens"]
             ) for row in rows]
     
+    async def get_all_libraries(self) -> list[Library]:
+        """Get all indexed libraries with metadata."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM libraries ORDER BY last_indexed DESC"
+            )
+            rows = await cursor.fetchall()
+
+            return [Library(
+                id=row["id"],
+                group_name=row["group_name"],
+                project_name=row["project_name"],
+                description=row["description"],
+                default_version=row["default_version"],
+                last_indexed=row["last_indexed"]
+            ) for row in rows]
+
     async def fuzzy_search(self, query: str, limit: int = 10) -> list[FuzzySearchResult]:
         """Fuzzy search across libraries."""
         query_lower = query.lower()

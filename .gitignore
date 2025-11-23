@@ -33,11 +33,10 @@ data/
 Thumbs.db
 
 # Development
-test_*.py
+#test_*.py
 check_db.py
 
 # Vibe workflow
 .vibe/
 docs/EXTENSIONS_ROADMAP.md
-pypi-test.sh
-pypi.sh
+.coverage
