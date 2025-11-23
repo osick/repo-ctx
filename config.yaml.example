@@ -1,0 +1,6 @@
+gitlab:
+  url: "https://gitlab.company.internal"
+  token: "${GITLAB_TOKEN}"  # or hardcode: "glpat-your-token-here"
+
+storage:
+  path: "./data/context.db"

@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Configuration (may contain sensitive data)
+config.yaml
+
+# Database
+data/
+*.db
+*.sqlite
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Development
+test_*.py
+check_db.py
+
+# Vibe workflow
+.vibe/
+docs/EXTENSIONS_ROADMAP.md
+pypi-test.sh
+pypi.sh
