@@ -1,0 +1,173 @@
+name: Publish to PyPI and GitHub Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
+
+    - name: Build package
+      run: uv build
+
+    - name: Store the distribution packages
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+
+  publish-to-pypi:
+    name: Publish to PyPI
+    needs:
+    - build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/repo-ctx
+
+    steps:
+    - name: Download all the dists
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+
+    - name: Publish distribution to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
+
+  github-release:
+    name: Create GitHub Release
+    needs:
+    - publish-to-pypi
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Download all the dists
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+
+    - name: Extract version from tag
+      id: version
+      run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get previous tag
+        PREV_TAG=$(git tag --sort=-version:refname | grep -A1 "${GITHUB_REF#refs/tags/}" | tail -1)
+
+        if [ -z "$PREV_TAG" ]; then
+          # First release, use all commits
+          CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges)
+        else
+          # Get commits since previous tag
+          CHANGELOG=$(git log ${PREV_TAG}..${GITHUB_REF#refs/tags/} --pretty=format:"- %s (%h)" --no-merges)
+        fi
+
+        # Save to file for release notes
+        cat > release_notes.md << EOF
+        ## What's Changed
+
+        ${CHANGELOG}
+
+        **Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${GITHUB_REF#refs/tags/}
+
+        ## Installation
+
+        \`\`\`bash
+        uvx repo-ctx
+        \`\`\`
+
+        Or install with pip:
+        \`\`\`bash
+        pip install repo-ctx
+        \`\`\`
+        EOF
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: dist/*
+        body_path: release_notes.md
+        tag_name: ${{ github.ref }}
+        name: Release v${{ steps.version.outputs.version }}
+        draft: false
+        prerelease: false
+        generate_release_notes: false
+
+  label-release:
+    name: Label as released
+    needs:
+    - github-release
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Add release label to issues
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const version = context.ref.replace('refs/tags/v', '');
+
+          // Get commits in this release
+          const commits = await github.rest.repos.compareCommits({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            base: 'HEAD~10',  // Last 10 commits
+            head: context.sha
+          });
+
+          // Extract issue numbers from commit messages
+          const issueNumbers = new Set();
+          for (const commit of commits.data.commits) {
+            const matches = commit.commit.message.match(/#(\d+)/g);
+            if (matches) {
+              matches.forEach(match => {
+                issueNumbers.add(parseInt(match.substring(1)));
+              });
+            }
+          }
+
+          // Add label to referenced issues
+          for (const issueNumber of issueNumbers) {
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: [`released-v${version}`]
+              });
+              console.log(`Added label to issue #${issueNumber}`);
+            } catch (error) {
+              console.log(`Could not label issue #${issueNumber}: ${error.message}`);
+            }
+          }

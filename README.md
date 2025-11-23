@@ -313,6 +313,41 @@ Retrieve documentation for a specific library.
 - Ensure token hasn't expired
 - Test connection: `curl -H "PRIVATE-TOKEN: $GITLAB_TOKEN" $GITLAB_URL/api/v4/user`
 
+## Development
+
+### Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details on:
+- Development setup
+- Running tests
+- Code style guidelines
+- Pull request process
+
+### Automated Releases
+
+This project uses GitHub Actions for automated releases:
+
+- **Tests** run on every PR and push to main
+- **Publishing** is automated when version tags are pushed
+- **GitHub Releases** are created automatically with changelogs
+- **Issue labeling** happens automatically for referenced issues
+
+See [docs/GITHUB_ACTIONS.md](docs/GITHUB_ACTIONS.md) for complete CI/CD documentation.
+
+### Quick Release
+
+```bash
+# Update version in pyproject.toml, then:
+git add pyproject.toml
+git commit -m "Bump version to 0.1.2"
+git tag v0.1.2
+git push origin main && git push origin v0.1.2
+```
+
+GitHub Actions will automatically build, test, and publish to PyPI.
+
+See [docs/RELEASE_GUIDE.md](docs/RELEASE_GUIDE.md) for detailed release instructions.
+
 ## Requirements
 
 - Python 3.11+
