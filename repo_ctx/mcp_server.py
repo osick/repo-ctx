@@ -11,6 +11,8 @@ async def serve(
     config_path: str = None,
     gitlab_url: str = None,
     gitlab_token: str = None,
+    github_url: str = None,
+    github_token: str = None,
     storage_path: str = None
 ):
     """Run MCP server.
@@ -19,6 +21,8 @@ async def serve(
         config_path: Optional path to config file
         gitlab_url: Optional GitLab URL (overrides config file)
         gitlab_token: Optional GitLab token (overrides config file)
+        github_url: Optional GitHub URL (overrides config file)
+        github_token: Optional GitHub token (overrides config file)
         storage_path: Optional storage path (overrides config file)
     """
     # Load config with priority: CLI args > env vars > config files
@@ -27,6 +31,8 @@ async def serve(
             config_path=config_path,
             gitlab_url=gitlab_url,
             gitlab_token=gitlab_token,
+            github_url=github_url,
+            github_token=github_token,
             storage_path=storage_path
         )
     except ValueError as e:
@@ -78,13 +84,19 @@ async def serve(
             ),
             Tool(
                 name="gitlab-index-repository",
-                description="Index a GitLab repository to make its documentation searchable. Use format: group/project or group/subgroup/project",
+                description="Index a repository from GitLab or GitHub to make its documentation searchable. Use format: group/project for GitLab, owner/repo for GitHub",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "repository": {
                             "type": "string",
-                            "description": "Repository path (e.g., 'group/repo' or 'group/subgroup/repository')"
+                            "description": "Repository path (e.g., 'group/repo' or 'owner/repo')"
+                        },
+                        "provider": {
+                            "type": "string",
+                            "description": "Provider to use: 'gitlab', 'github', or 'auto' for auto-detection (default: auto)",
+                            "enum": ["gitlab", "github", "auto"],
+                            "default": "auto"
                         }
                     },
                     "required": ["repository"]
@@ -92,18 +104,24 @@ async def serve(
             ),
             Tool(
                 name="gitlab-index-group",
-                description="Index all repositories in a GitLab group. Optionally include subgroups.",
+                description="Index all repositories in a GitLab group or GitHub organization. Optionally include subgroups (GitLab only).",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "group": {
                             "type": "string",
-                            "description": "Group path (e.g., 'groupname')"
+                            "description": "Group/organization path (e.g., 'groupname' or 'orgname')"
                         },
                         "includeSubgroups": {
                             "type": "boolean",
-                            "description": "Include subgroups (default: true)",
+                            "description": "Include subgroups - only works with GitLab (default: true)",
                             "default": True
+                        },
+                        "provider": {
+                            "type": "string",
+                            "description": "Provider to use: 'gitlab', 'github', or 'auto' (default: auto)",
+                            "enum": ["gitlab", "github", "auto"],
+                            "default": "auto"
                         }
                     },
                     "required": ["group"]
@@ -182,43 +200,53 @@ async def serve(
         
         elif name == "gitlab-index-repository":
             repository = arguments["repository"]
+            provider = arguments.get("provider", "auto")
             parts = repository.split("/")
             if len(parts) < 2:
-                return [TextContent(type="text", text=f"Error: Repository must be in format group/project or group/subgroup/project")]
-            
+                return [TextContent(type="text", text=f"Error: Repository must be in format group/project or owner/repo")]
+
             project = parts[-1]
             group = "/".join(parts[:-1])
-            
+
+            # Convert "auto" to None for auto-detection
+            provider_type = None if provider == "auto" else provider
+
             try:
-                await context.index_repository(group, project)
-                return [TextContent(type="text", text=f"Successfully indexed {repository}. You can now search for it using gitlab-fuzzy-search or gitlab-get-docs.")]
+                await context.index_repository(group, project, provider_type=provider_type)
+                provider_used = provider_type or "auto-detected"
+                return [TextContent(type="text", text=f"Successfully indexed {repository} using {provider_used} provider. You can now search for it using gitlab-fuzzy-search or gitlab-get-docs.")]
             except Exception as e:
                 return [TextContent(type="text", text=f"Error indexing {repository}: {str(e)}")]
         
         elif name == "gitlab-index-group":
             group = arguments["group"]
             include_subgroups = arguments.get("includeSubgroups", True)
-            
+            provider = arguments.get("provider", "auto")
+
+            # Convert "auto" to None for auto-detection
+            provider_type = None if provider == "auto" else provider
+
             try:
-                results = await context.index_group(group, include_subgroups)
+                results = await context.index_group(group, include_subgroups, provider_type=provider_type)
                 output = []
-                output.append(f"Indexed group '{group}':\n\n")
+                provider_used = provider_type or "auto-detected"
+                output.append(f"Indexed group '{group}' using {provider_used} provider:\n\n")
                 output.append(f"Total projects: {results['total']}\n")
                 output.append(f"Successfully indexed: {len(results['indexed'])}\n")
                 output.append(f"Failed: {len(results['failed'])}\n\n")
-                
+
                 if results['indexed']:
                     output.append("Indexed repositories:\n")
                     for repo in results['indexed'][:10]:  # Show first 10
                         output.append(f"  - {repo}\n")
                     if len(results['indexed']) > 10:
                         output.append(f"  ... and {len(results['indexed']) - 10} more\n")
-                
+
                 if results['failed']:
                     output.append("\nFailed repositories:\n")
                     for fail in results['failed'][:5]:  # Show first 5 failures
                         output.append(f"  - {fail['path']}: {fail['error']}\n")
-                
+
                 return [TextContent(type="text", text="".join(output))]
             except Exception as e:
                 return [TextContent(type="text", text=f"Error indexing group {group}: {str(e)}")]

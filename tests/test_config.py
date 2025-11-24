@@ -65,19 +65,19 @@ class TestConfigFromEnv:
             assert config.storage_path == '/prefixed/path.db'
 
     def test_from_env_missing_url(self):
-        """Test error when GITLAB_URL is missing."""
+        """Test error when no provider is configured (only GitLab token)."""
         with patch.dict(os.environ, {
             'GITLAB_TOKEN': 'token'
         }, clear=True):
-            with pytest.raises(ValueError, match="GITLAB_URL.*must be set"):
+            with pytest.raises(ValueError, match="At least one provider must be configured"):
                 Config.from_env()
 
     def test_from_env_missing_token(self):
-        """Test error when GITLAB_TOKEN is missing."""
+        """Test GitLab URL alone is not enough (need token too or GitHub)."""
         with patch.dict(os.environ, {
             'GITLAB_URL': 'https://gitlab.example.com'
         }, clear=True):
-            with pytest.raises(ValueError, match="GITLAB_TOKEN.*must be set"):
+            with pytest.raises(ValueError, match="At least one provider must be configured"):
                 Config.from_env()
 
     def test_from_env_both_missing(self):
@@ -335,6 +335,9 @@ class TestConfigModel:
         assert config.storage_path == "./data/context.db"
 
     def test_config_validation(self):
-        """Test Pydantic validation."""
-        with pytest.raises(Exception):  # Pydantic ValidationError
-            Config(gitlab_url="url")  # Missing required field
+        """Test Config can be created with partial provider config."""
+        # Now that providers are optional, Config can be created with partial info
+        # Provider initialization will fail, but Config object is valid
+        config = Config(gitlab_url="url")  # This is now valid
+        assert config.gitlab_url == "url"
+        assert config.gitlab_token is None  # Optional field

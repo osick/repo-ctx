@@ -52,14 +52,30 @@ Examples:
         help="GitLab personal access token"
     )
     parser.add_argument(
+        "--github-url",
+        help="GitHub API URL (default: https://api.github.com)"
+    )
+    parser.add_argument(
+        "--github-token",
+        help="GitHub personal access token (optional for public repos)"
+    )
+    parser.add_argument(
         "--storage-path",
         help="Path to SQLite database file (default: ~/.repo-ctx/context.db)"
+    )
+
+    # Provider selection
+    parser.add_argument(
+        "--provider",
+        choices=["gitlab", "github", "auto"],
+        default="auto",
+        help="Provider to use (default: auto-detect from path format)"
     )
 
     # Legacy action (for backwards compatibility)
     parser.add_argument(
         "--index",
-        help="Index a repository (format: group/project or group/subgroup/project)"
+        help="Index a repository (format: group/project or owner/repo)"
     )
 
     # Subcommands
@@ -125,8 +141,11 @@ Examples:
             config_path=args.config,
             gitlab_url=args.gitlab_url,
             gitlab_token=args.gitlab_token,
+            github_url=args.github_url,
+            github_token=args.github_token,
             storage_path=args.storage_path,
-            repo=args.index
+            repo=args.index,
+            provider=args.provider if args.provider != "auto" else None
         ))
         return
 
@@ -136,6 +155,8 @@ Examples:
             config_path=args.config,
             gitlab_url=args.gitlab_url,
             gitlab_token=args.gitlab_token,
+            github_url=args.github_url,
+            github_token=args.github_token,
             storage_path=args.storage_path,
             query=args.query,
             limit=args.limit,
@@ -146,6 +167,8 @@ Examples:
             config_path=args.config,
             gitlab_url=args.gitlab_url,
             gitlab_token=args.gitlab_token,
+            github_url=args.github_url,
+            github_token=args.github_token,
             storage_path=args.storage_path,
             format_type=args.format
         ))
@@ -154,6 +177,8 @@ Examples:
             config_path=args.config,
             gitlab_url=args.gitlab_url,
             gitlab_token=args.gitlab_token,
+            github_url=args.github_url,
+            github_token=args.github_token,
             storage_path=args.storage_path,
             repository=args.repository,
             topic=args.topic,
@@ -165,6 +190,8 @@ Examples:
             config_path=args.config,
             gitlab_url=args.gitlab_url,
             gitlab_token=args.gitlab_token,
+            github_url=args.github_url,
+            github_token=args.github_token,
             storage_path=args.storage_path
         ))
 
@@ -173,13 +200,16 @@ async def index_repository(
     config_path: str = None,
     gitlab_url: str = None,
     gitlab_token: str = None,
+    github_url: str = None,
+    github_token: str = None,
     storage_path: str = None,
-    repo: str = None
+    repo: str = None,
+    provider: str = None
 ):
     """Index a repository."""
     parts = repo.split("/")
     if len(parts) < 2:
-        print("Error: Repository must be in format group/project or group/subgroup/project")
+        print("Error: Repository must be in format group/project or owner/repo")
         return
 
     # Handle nested groups: everything except last part is the group
@@ -191,6 +221,8 @@ async def index_repository(
             config_path=config_path,
             gitlab_url=gitlab_url,
             gitlab_token=gitlab_token,
+            github_url=github_url,
+            github_token=github_token,
             storage_path=storage_path
         )
     except ValueError as e:
@@ -200,9 +232,15 @@ async def index_repository(
     context = GitLabContext(config)
     await context.init()
 
+    # Show which provider will be used
+    if provider:
+        print(f"Using provider: {provider}")
+    else:
+        print(f"Auto-detecting provider from path format...")
+
     print(f"Indexing {group}/{project}...")
     try:
-        await context.index_repository(group, project)
+        await context.index_repository(group, project, provider_type=provider)
         print(f"✓ Successfully indexed {group}/{project}")
     except Exception as e:
         print(f"✗ Error indexing repository: {e}")
@@ -212,6 +250,8 @@ async def search_command(
     config_path: str = None,
     gitlab_url: str = None,
     gitlab_token: str = None,
+    github_url: str = None,
+    github_token: str = None,
     storage_path: str = None,
     query: str = None,
     limit: int = 10,
@@ -223,6 +263,8 @@ async def search_command(
             config_path=config_path,
             gitlab_url=gitlab_url,
             gitlab_token=gitlab_token,
+            github_url=github_url,
+            github_token=github_token,
             storage_path=storage_path
         )
     except ValueError as e:
@@ -275,6 +317,8 @@ async def list_command(
     config_path: str = None,
     gitlab_url: str = None,
     gitlab_token: str = None,
+    github_url: str = None,
+    github_token: str = None,
     storage_path: str = None,
     format_type: str = "detailed"
 ):
@@ -284,6 +328,8 @@ async def list_command(
             config_path=config_path,
             gitlab_url=gitlab_url,
             gitlab_token=gitlab_token,
+            github_url=github_url,
+            github_token=github_token,
             storage_path=storage_path
         )
     except ValueError as e:
@@ -338,6 +384,8 @@ async def docs_command(
     config_path: str = None,
     gitlab_url: str = None,
     gitlab_token: str = None,
+    github_url: str = None,
+    github_token: str = None,
     storage_path: str = None,
     repository: str = None,
     topic: str = None,
@@ -349,6 +397,8 @@ async def docs_command(
             config_path=config_path,
             gitlab_url=gitlab_url,
             gitlab_token=gitlab_token,
+            github_url=github_url,
+            github_token=github_token,
             storage_path=storage_path
         )
     except ValueError as e:

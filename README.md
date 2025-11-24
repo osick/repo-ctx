@@ -5,10 +5,11 @@ A flexible Git repository documentation indexer and search tool with multiple in
 - **CLI** for standalone searching
 - **Python library** for custom integrations
 
-Primarily designed for GitLab but extensible to other Git platforms.
+Supports **GitLab** and **GitHub** repositories (including Enterprise versions) with auto-detection and explicit provider selection.
 
 ## Features
 
+- **Multi-provider support** - Index from GitLab and GitHub simultaneously
 - Search repositories by name with fuzzy matching
 - Retrieve documentation with topic filtering
 - Support for multiple versions (tags/branches)
@@ -17,6 +18,7 @@ Primarily designed for GitLab but extensible to other Git platforms.
 - MCP protocol for seamless LLM integration
 - Works with Claude Code, Kiro CLI, GitHub Copilot, and other AI tools
 - Use as a Python library in your own tools
+- Auto-detect provider from repository path format
 
 ## Installation
 
@@ -35,45 +37,69 @@ uv pip install -e .
 
 ## Configuration
 
-Git Context supports multiple configuration methods with the following priority (highest to lowest):
+repo-ctx supports GitLab and GitHub (including Enterprise versions). Configure one or both providers using:
 
-1. **Command-line arguments** (`--gitlab-url`, `--gitlab-token`)
+1. **Command-line arguments** (`--gitlab-url`, `--gitlab-token`, `--github-token`)
 2. **Specified config file** (`--config /path/to/config.yaml`)
-3. **Environment variables** (`GITLAB_URL`, `GITLAB_TOKEN`)
+3. **Environment variables** (`GITLAB_URL`, `GITLAB_TOKEN`, `GITHUB_TOKEN`)
 4. **Standard config locations**:
    - `~/.config/repo-ctx/config.yaml`
    - `~/.repo-ctx/config.yaml`
    - `./config.yaml` (current directory)
 
-### Option 1: Environment Variables (Easiest for uvx)
+**📚 Complete Guide:** See [Multi-Provider Support Guide](docs/multi-provider-guide.md) for detailed configuration options, examples, and troubleshooting.
+
+### Quick Start: GitLab Only
 
 ```bash
 export GITLAB_URL="https://gitlab.company.internal"
 export GITLAB_TOKEN="glpat-your-token-here"
-export STORAGE_PATH="~/.repo-ctx/context.db"  # Optional
 
-uvx repo-ctx
+uvx repo-ctx --index group/project
 ```
 
-### Option 2: Config File
+### Quick Start: GitHub Only
+
+```bash
+# Public repos (no token needed, subject to 60/hr rate limit)
+uvx repo-ctx --index owner/repo
+
+# Private repos or higher rate limits (5000/hr)
+export GITHUB_TOKEN="ghp-your-token-here"
+uvx repo-ctx --index owner/repo
+```
+
+### Quick Start: Both Providers
+
+```bash
+export GITLAB_URL="https://gitlab.company.com"
+export GITLAB_TOKEN="glpat-xxx"
+export GITHUB_TOKEN="ghp-xxx"
+
+# Auto-detect provider from path format
+uvx repo-ctx --index owner/repo              # → GitHub (2 parts)
+uvx repo-ctx --index group/subgroup/project  # → GitLab (3+ parts)
+
+# Or explicitly specify provider
+uvx repo-ctx --index owner/repo --provider github
+uvx repo-ctx --index group/project --provider gitlab
+```
+
+### Config File (Both Providers)
 
 Create `~/.config/repo-ctx/config.yaml`:
 
 ```yaml
 gitlab:
   url: "https://gitlab.company.internal"
-  token: "${GITLAB_TOKEN}"  # or hardcode token
+  token: "${GITLAB_TOKEN}"
+
+github:
+  url: "https://api.github.com"  # Optional, defaults to public GitHub
+  token: "${GITHUB_TOKEN}"        # Optional for public repos
 
 storage:
   path: "~/.repo-ctx/context.db"
-```
-
-### Option 3: Command-Line Arguments
-
-```bash
-uvx repo-ctx \
-  --gitlab-url https://gitlab.company.internal \
-  --gitlab-token glpat-your-token
 ```
 
 
@@ -86,28 +112,33 @@ repo-ctx can be imported and used as a library in your own applications:
 ```python
 import asyncio
 from repo_ctx.config import Config
-from repo_ctx.core import GitLabContext
+from repo_ctx.core import RepositoryContext
 
 async def main():
-    # Initialize
+    # Initialize with both providers
     config = Config.from_env()
-    context = GitLabContext(config)
+    context = RepositoryContext(config)
     await context.init()
 
-    # Index a repository
-    await context.index_repository("mygroup", "myproject")
+    # Index from GitLab
+    await context.index_repository("mygroup", "myproject", provider_type="gitlab")
 
-    # Search
-    results = await context.fuzzy_search_libraries("myproject", limit=5)
+    # Index from GitHub
+    await context.index_repository("fastapi", "fastapi", provider_type="github")
+
+    # Search across all indexed repos
+    results = await context.fuzzy_search_libraries("fastapi", limit=5)
     for result in results:
         print(f"{result.name} (score: {result.score})")
 
-    # Get documentation
-    docs = await context.get_documentation("/mygroup/myproject")
+    # Get documentation (works for any indexed repo)
+    docs = await context.get_documentation("/fastapi/fastapi")
     print(docs["content"][0]["text"])
 
 asyncio.run(main())
 ```
+
+**Note:** `RepositoryContext` is the new multi-provider class. `GitLabContext` is still available as a backward-compatible alias.
 
 **📚 Library Documentation:**
 - [Quickstart Guide](docs/library/quickstart.md) - Get started in 5 minutes
@@ -173,25 +204,44 @@ uv run repo-ctx docs mygroup/project --page 2
 
 #### Index a Repository
 
-With environment variables:
+**GitLab:**
 ```bash
 export GITLAB_URL="https://gitlab.company.internal"
 export GITLAB_TOKEN="your_token"
 uvx repo-ctx --index group/project
 ```
 
-With command-line arguments:
+**GitHub:**
 ```bash
+export GITHUB_TOKEN="ghp-your-token"
+uvx repo-ctx --index owner/repo
+
+# Or with explicit provider
+uvx repo-ctx --index owner/repo --provider github
+```
+
+**With command-line arguments:**
+```bash
+# GitLab
 uvx repo-ctx \
   --gitlab-url https://gitlab.company.internal \
   --gitlab-token glpat-your-token \
   --index group/subgroup/repository
+
+# GitHub
+uvx repo-ctx \
+  --github-token ghp-your-token \
+  --index owner/repo \
+  --provider github
 ```
 
-From source:
+**From source:**
 ```bash
-uv run repo-ctx --index group/subgroup/repository
+uv run repo-ctx --index group/subgroup/repository --provider gitlab
+uv run repo-ctx --index owner/repo --provider github
 ```
+
+**📚 More examples:** See [Multi-Provider Guide](docs/multi-provider-guide.md) for GitHub Enterprise, both providers simultaneously, and advanced usage.
 
 ### Run as MCP Server
 
@@ -209,12 +259,15 @@ Add to MCP settings (e.g., `~/.config/claude/mcp.json`):
       "args": ["repo-ctx"],
       "env": {
         "GITLAB_URL": "https://gitlab.company.internal",
-        "GITLAB_TOKEN": "${GITLAB_TOKEN}"
+        "GITLAB_TOKEN": "${GITLAB_TOKEN}",
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
       }
     }
   }
 }
 ```
+
+**Note:** Configure one or both providers. The example above shows both GitLab and GitHub configured.
 
 **Option 2: Using uvx with config file**
 
