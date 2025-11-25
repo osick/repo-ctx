@@ -4,7 +4,7 @@ import argparse
 import sys
 from datetime import datetime
 from .mcp_server import serve
-from .core import GitLabContext
+from .core import GitLabContext, RepositoryContext
 from .config import Config
 
 
@@ -67,7 +67,7 @@ Examples:
     # Provider selection
     parser.add_argument(
         "--provider",
-        choices=["gitlab", "github", "auto"],
+        choices=["gitlab", "github", "local", "auto"],
         default="auto",
         help="Provider to use (default: auto-detect from path format)"
     )
@@ -207,14 +207,24 @@ async def index_repository(
     provider: str = None
 ):
     """Index a repository."""
-    parts = repo.split("/")
-    if len(parts) < 2:
-        print("Error: Repository must be in format group/project or owner/repo")
-        return
+    from .providers.detector import ProviderDetector
 
-    # Handle nested groups: everything except last part is the group
-    project = parts[-1]
-    group = "/".join(parts[:-1])
+    # Auto-detect provider type to determine if it's a local path
+    detected_provider = ProviderDetector.detect(repo)
+
+    # For local paths, don't split - use the full path
+    if detected_provider == "local" or provider == "local" or repo.startswith(("/", "./", "~/")):
+        group = repo
+        project = ""
+    else:
+        # For remote repos, split into group/project
+        parts = repo.split("/")
+        if len(parts) < 2:
+            print("Error: Repository must be in format group/project or owner/repo")
+            return
+        # Handle nested groups: everything except last part is the group
+        project = parts[-1]
+        group = "/".join(parts[:-1])
 
     try:
         config = Config.load(
@@ -226,10 +236,14 @@ async def index_repository(
             storage_path=storage_path
         )
     except ValueError as e:
-        print(f"Configuration error: {e}")
-        return
+        # For local provider, configuration error is OK (no URL/token needed)
+        if provider == "local" or detected_provider == "local":
+            config = Config(storage_path=storage_path or Config._default_storage_path())
+        else:
+            print(f"Configuration error: {e}")
+            return
 
-    context = GitLabContext(config)
+    context = RepositoryContext(config)
     await context.init()
 
     # Show which provider will be used
@@ -238,10 +252,10 @@ async def index_repository(
     else:
         print(f"Auto-detecting provider from path format...")
 
-    print(f"Indexing {group}/{project}...")
+    print(f"Indexing {repo}...")
     try:
         await context.index_repository(group, project, provider_type=provider)
-        print(f"✓ Successfully indexed {group}/{project}")
+        print(f"✓ Successfully indexed {repo}")
     except Exception as e:
         print(f"✗ Error indexing repository: {e}")
 
@@ -352,12 +366,20 @@ async def list_command(
 
         if format_type == "simple":
             for lib in libraries:
-                print(f"  - {lib.group_name}/{lib.project_name}")
+                # Clean up path display
+                path = _format_repo_path(lib.group_name, lib.project_name)
+                print(f"  - {path}")
         else:  # detailed
             for i, lib in enumerate(libraries, 1):
-                print(f"{i}. {lib.group_name}/{lib.project_name}")
+                # Clean up path display
+                path = _format_repo_path(lib.group_name, lib.project_name)
+                print(f"{i}. {path}")
+
                 if lib.description:
-                    desc = lib.description[:100] + "..." if len(lib.description) > 100 else lib.description
+                    # Clean HTML/markdown tags and truncate
+                    desc = _clean_description(lib.description)
+                    if len(desc) > 100:
+                        desc = desc[:97] + "..."
                     print(f"   Description: {desc}")
                 print(f"   Default version: {lib.default_version}")
 
@@ -467,6 +489,61 @@ def format_time_ago(dt: datetime) -> str:
     else:
         years = int(seconds / 31536000)
         return f"{years} year{'s' if years != 1 else ''} ago"
+
+
+def _format_repo_path(group_name: str, project_name: str) -> str:
+    """Format repository path for display.
+
+    Args:
+        group_name: Group/organization or full path for local repos
+        project_name: Project/repository name (empty for local repos)
+
+    Returns:
+        Cleaned path string
+    """
+    if project_name:
+        # Remote repo: group/project
+        path = f"{group_name}/{project_name}"
+    else:
+        # Local repo: group_name contains full path
+        path = group_name
+
+    # Remove trailing slashes
+    path = path.rstrip('/')
+
+    return path
+
+
+def _clean_description(description: str) -> str:
+    """Clean description by removing HTML/markdown tags and extra whitespace.
+
+    Args:
+        description: Raw description text
+
+    Returns:
+        Cleaned description
+    """
+    import re
+
+    # Remove HTML tags
+    text = re.sub(r'<[^>]+>', '', description)
+
+    # Remove markdown links: [text](url) -> text
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+
+    # Remove markdown bold/italic: **text** or *text* -> text
+    text = re.sub(r'\*+([^\*]+)\*+', r'\1', text)
+
+    # Remove markdown heading markers
+    text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
+
+    # Collapse multiple whitespace into single space
+    text = re.sub(r'\s+', ' ', text)
+
+    # Strip leading/trailing whitespace
+    text = text.strip()
+
+    return text
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ repo-ctx provides **5 MCP tools** for repository documentation indexing and retr
 4. **gitlab-index-group** - Index all repositories in a group/organization
 5. **gitlab-get-docs** - Retrieve documentation content
 
-**Note:** Despite the "gitlab-" prefix, all tools support both **GitLab and GitHub** repositories.
+**Note:** Despite the "gitlab-" prefix, all tools support **GitLab, GitHub, and local Git repositories**.
 
 ---
 
@@ -137,12 +137,13 @@ To get documentation, use gitlab-get-docs with one of the Library IDs above.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `repository` | string | ✅ Yes | - | Repository path (e.g., 'owner/repo' or 'group/project') |
-| `provider` | string | ❌ No | "auto" | Provider: 'gitlab', 'github', or 'auto' for auto-detection |
+| `repository` | string | ✅ Yes | - | Repository path (e.g., 'owner/repo', 'group/project', or '/path/to/local/repo') |
+| `provider` | string | ❌ No | "auto" | Provider: 'gitlab', 'github', 'local', or 'auto' for auto-detection |
 
 ### Provider Auto-Detection
 
 When `provider` is "auto" or omitted:
+- **Absolute/relative paths** (`/path`, `./path`, `~/path`) → Local
 - **2 parts** (`owner/repo`) → GitHub
 - **3+ parts** (`group/subgroup/project`) → GitLab
 
@@ -153,6 +154,16 @@ Success or error message with details about the indexing operation.
 ### Example Usage
 
 ```javascript
+// Auto-detect provider (Local - absolute path)
+await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+  repository: "/home/user/projects/my-app"
+});
+
+// Auto-detect provider (Local - relative path)
+await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+  repository: "~/projects/my-app"
+});
+
 // Auto-detect provider (GitHub - 2 parts)
 await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
   repository: "fastapi/fastapi"
@@ -161,6 +172,12 @@ await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
 // Auto-detect provider (GitLab - 3 parts)
 await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
   repository: "mygroup/subgroup/project"
+});
+
+// Explicitly use local
+await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+  repository: "/path/to/repo",
+  provider: "local"
 });
 
 // Explicitly use GitHub
@@ -425,8 +442,21 @@ const docs = await use_mcp_tool("repo-ctx", "gitlab-get-docs", {
 
 ### MCP Server Setup
 
-Add to `~/.config/claude/mcp.json`:
+**Configuration is optional** for local repositories and GitHub public repos!
 
+**Minimal setup (local repos + GitHub public):**
+```json
+{
+  "mcpServers": {
+    "repo-ctx": {
+      "command": "uvx",
+      "args": ["repo-ctx"]
+    }
+  }
+}
+```
+
+**Full setup (all providers):**
 ```json
 {
   "mcpServers": {
@@ -443,7 +473,11 @@ Add to `~/.config/claude/mcp.json`:
 }
 ```
 
-**Note:** Configure at least one provider (GitLab or GitHub).
+**Configuration requirements:**
+- **Local repos:** No configuration needed
+- **GitHub public repos:** No configuration needed (60 req/hr rate limit)
+- **GitHub private repos:** Requires `GITHUB_TOKEN` (5000 req/hr)
+- **GitLab:** Requires `GITLAB_URL` and `GITLAB_TOKEN`
 
 ---
 
@@ -451,21 +485,39 @@ Add to `~/.config/claude/mcp.json`:
 
 ### Common Errors and Solutions
 
-**"At least one provider must be configured"**
-- Solution: Set GITLAB_TOKEN and/or GITHUB_TOKEN in MCP config
+**"Provider 'local' not configured"**
+- This shouldn't happen - local provider is always available
+- Check that the path points to a valid Git repository
 
 **"Provider 'github' not configured"**
-- Solution: Add GITHUB_TOKEN to MCP server environment
+- ~~Solution: Add GITHUB_TOKEN to MCP server environment~~
+- **New behavior:** GitHub is always available for public repos!
+- If you see this error, it's likely a bug - GitHub should work without token
+
+**"Provider 'gitlab' not configured"**
+- Solution: Add GITLAB_URL and GITLAB_TOKEN to MCP server environment
 
 **"Repository not found"**
 - Solution: Check repository path format and provider
-- Ensure you have access (token has correct permissions)
+- For local: Ensure path contains `.git` directory
+- For GitHub/GitLab: Ensure you have access (token has correct permissions)
+- Check repository visibility (public vs private)
+
+**"GitHub authentication failed, falling back to unauthenticated access"**
+- Warning (not error): Invalid or expired GitHub token detected
+- Automatically falls back to unauthenticated mode for public repos
+- To fix: Update your GITHUB_TOKEN with a valid token
+- Unauthenticated mode: 60 requests/hour rate limit
 
 **"No results found"**
 - Solution: Index the repository first using gitlab-index-repository
 
 **"Version not found"**
 - Solution: Check available versions with gitlab-search-libraries
+
+**"Path is not a Git repository"**
+- Solution: Ensure the path contains a `.git` directory
+- Initialize Git: `git init` (if starting a new repo)
 
 ---
 
@@ -602,7 +654,7 @@ while (hasMore) {
 
 ## Tool Name Note
 
-All tools have the `gitlab-` prefix for **historical reasons** (repo-ctx was initially GitLab-focused). However, all tools now support **both GitLab and GitHub**. The prefix may be updated in a future version with backward-compatible aliases.
+All tools have the `gitlab-` prefix for **historical reasons** (repo-ctx was initially GitLab-focused). However, all tools now support **GitLab, GitHub, and local Git repositories**. The prefix may be updated in a future version with backward-compatible aliases.
 
 ---
 
@@ -610,11 +662,17 @@ All tools have the `gitlab-` prefix for **historical reasons** (repo-ctx was ini
 
 | Tool | Purpose | Key Parameters | Provider Support |
 |------|---------|----------------|------------------|
-| `gitlab-search-libraries` | Exact name search | `libraryName` | Both (searches all indexed) |
-| `gitlab-fuzzy-search` | Fuzzy/typo-tolerant search | `query`, `limit` | Both (searches all indexed) |
-| `gitlab-index-repository` | Index single repo | `repository`, `provider` | GitLab, GitHub |
-| `gitlab-index-group` | Index group/org | `group`, `includeSubgroups`, `provider` | GitLab, GitHub |
-| `gitlab-get-docs` | Get documentation | `libraryId`, `topic`, `page` | Both (retrieves any indexed) |
+| `gitlab-search-libraries` | Exact name search | `libraryName` | All (searches all indexed repos) |
+| `gitlab-fuzzy-search` | Fuzzy/typo-tolerant search | `query`, `limit` | All (searches all indexed repos) |
+| `gitlab-index-repository` | Index single repo | `repository`, `provider` | GitLab, GitHub, Local |
+| `gitlab-index-group` | Index group/org | `group`, `includeSubgroups`, `provider` | GitLab, GitHub (not Local) |
+| `gitlab-get-docs` | Get documentation | `libraryId`, `topic`, `page` | All (retrieves any indexed repo) |
+
+**Provider Configuration:**
+- **Local:** No configuration required ✅
+- **GitHub public:** No configuration required ✅ (60 req/hr)
+- **GitHub private:** Requires `GITHUB_TOKEN` (5000 req/hr)
+- **GitLab:** Requires `GITLAB_URL` + `GITLAB_TOKEN`
 
 ---
 

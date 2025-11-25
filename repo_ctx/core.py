@@ -51,33 +51,51 @@ class RepositoryContext:
                 # GitLab provider initialization failed, continue without it
                 pass
 
-        # Initialize GitHub provider if configured
-        if self.config.github_url or self.config.github_token:
-            try:
-                github_url = self.config.github_url or "https://api.github.com"
-                self.providers["github"] = ProviderFactory.create_github(
-                    url=github_url,
-                    token=self.config.github_token
-                )
-            except Exception:
-                # GitHub provider initialization failed, continue without it
-                pass
+        # Initialize GitHub provider (always available for public repos)
+        # Token is optional - public repos work without authentication (with rate limits)
+        try:
+            github_url = self.config.github_url or "https://api.github.com"
+            self.providers["github"] = ProviderFactory.create_github(
+                url=github_url,
+                token=self.config.github_token  # Can be None for public repos
+            )
+        except Exception as e:
+            # If authentication fails with a token, try without token for public repos
+            from .providers.exceptions import ProviderAuthError
+            if isinstance(e, ProviderAuthError) and self.config.github_token:
+                try:
+                    print(f"Warning: GitHub token authentication failed, falling back to unauthenticated access")
+                    print(f"         (Public repos only, with rate limits)")
+                    github_url = self.config.github_url or "https://api.github.com"
+                    self.providers["github"] = ProviderFactory.create_github(
+                        url=github_url,
+                        token=None  # No token for public repos
+                    )
+                except Exception:
+                    # Still failed, give up on GitHub provider
+                    pass
+            # GitHub provider initialization failed, continue without it
+
+        # Local provider is always available (no config needed)
+        # It will be instantiated on-demand when indexing a specific path
+        self.local_provider_available = True
 
         # Set default provider based on what's available
         if "gitlab" in self.providers:
             self.default_provider = "gitlab"
         elif "github" in self.providers:
             self.default_provider = "github"
+        else:
+            # If no remote providers configured, default to local
+            self.default_provider = "local"
 
-        # Future: Local provider
-        # self.providers["local"] = ProviderFactory.create_local()
-
-    def get_provider(self, provider_type: Optional[str] = None) -> GitProvider:
+    def get_provider(self, provider_type: Optional[str] = None, repo_path: Optional[str] = None) -> GitProvider:
         """
         Get provider instance.
 
         Args:
             provider_type: Provider type, or None to use default
+            repo_path: Repository path (required for local provider)
 
         Returns:
             Provider instance
@@ -87,10 +105,17 @@ class RepositoryContext:
         """
         provider_type = provider_type or self.default_provider
 
+        # Special handling for local provider (created on-demand)
+        if provider_type == "local":
+            if not repo_path:
+                raise ValueError("Local provider requires repo_path parameter")
+            from .providers.local import LocalGitProvider
+            return LocalGitProvider(repo_path)
+
         if provider_type not in self.providers:
             raise ValueError(
                 f"Provider '{provider_type}' not configured. "
-                f"Available: {list(self.providers.keys())}"
+                f"Available: {list(self.providers.keys()) + ['local']}"
             )
 
         return self.providers[provider_type]
@@ -201,8 +226,8 @@ class RepositoryContext:
         Index a repository from any provider.
 
         Args:
-            group: Group/organization path
-            project: Project/repository name
+            group: Group/organization path (or full path for local repos)
+            project: Project/repository name (or empty for local repos)
             provider_type: Provider type (gitlab, github, local) or None for auto-detect
 
         Raises:
@@ -211,13 +236,19 @@ class RepositoryContext:
         """
         # Auto-detect provider if not specified
         if provider_type is None:
-            path = f"{group}/{project}"
+            path = f"{group}/{project}" if project else group
             provider_type = ProviderDetector.detect(path, default=self.default_provider)
 
-        provider = self.get_provider(provider_type)
+        # For local provider, group contains the full path
+        if provider_type == "local":
+            repo_path = f"{group}/{project}" if project else group
+            provider = self.get_provider(provider_type, repo_path=repo_path)
+            project_path = repo_path
+        else:
+            provider = self.get_provider(provider_type)
+            project_path = f"{group}/{project}"
 
         # Get project via provider interface
-        project_path = f"{group}/{project}"
         proj = await provider.get_project(project_path)
 
         # Get default branch

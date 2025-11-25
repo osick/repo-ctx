@@ -40,3 +40,6 @@ check_db.py
 .vibe/
 docs/EXTENSIONS_ROADMAP.md
 .coverage
+docs/architecture/IMPLEMENTATION_PLAN_phase1.md
+docs/architecture/TEST_PLAN_phase1.md
+docs/PHASE1_PLANNING_SUMMARY.md

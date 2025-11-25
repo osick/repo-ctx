@@ -277,18 +277,17 @@ class Config(BaseModel):
             except Exception as e:
                 raise ValueError(f"Error loading config from {config_file}: {e}")
 
-        # No valid config found
-        raise ValueError(
-            "No configuration found. Please configure at least one provider:\n\n"
-            "Option 1: Environment variables\n"
-            "  GitLab: GITLAB_URL and GITLAB_TOKEN\n"
-            "  GitHub: GITHUB_URL (optional) and GITHUB_TOKEN\n\n"
-            "Option 2: Config file in:\n"
-            "  - Current directory (config.yaml)\n"
-            "  - ~/.config/repo-ctx/config.yaml\n"
-            "  - ~/.repo-ctx/config.yaml\n\n"
-            "Option 3: Command-line arguments\n"
-            "  --gitlab-url --gitlab-token\n"
-            "  --github-url --github-token\n\n"
-            "Option 4: Use --config to specify config file path"
+        # No valid config found - but GitHub and local providers work without credentials
+        # Create minimal config with default storage path
+        return cls(
+            gitlab_url=None,
+            gitlab_token=None,
+            github_url=None,  # Will use default in provider init
+            github_token=None,  # Optional for public repos
+            storage_path=storage_path or os.path.expanduser("~/.repo-ctx/context.db")
         )
+
+        # Note: Old behavior was to raise error, but now we allow no-config usage:
+        # - GitHub works for public repos without token (with rate limits)
+        # - Local provider works without any configuration
+        # - GitLab requires credentials (will fail at provider usage time if needed)

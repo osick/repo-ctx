@@ -292,11 +292,21 @@ gitlab:
                 assert config.gitlab_token == "standard-token"
 
     def test_load_no_valid_config_found(self):
-        """Test error when no configuration source is available."""
+        """Test minimal config returned when no configuration source is available.
+
+        GitHub and local providers work without credentials, so Config.load()
+        returns a minimal config instead of raising an error.
+        """
         with patch.dict(os.environ, {}, clear=True):
             with patch('repo_ctx.config.Config.find_config_file', return_value=None):
-                with pytest.raises(ValueError, match="No configuration found"):
-                    Config.load()
+                config = Config.load()
+                # Should return minimal config with no provider credentials
+                assert config.gitlab_url is None
+                assert config.gitlab_token is None
+                assert config.github_url is None
+                assert config.github_token is None
+                # Should have default storage path
+                assert config.storage_path == os.path.expanduser("~/.repo-ctx/context.db")
 
     def test_load_config_file_not_found_error(self):
         """Test error when explicitly specified config file doesn't exist."""

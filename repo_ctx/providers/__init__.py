@@ -12,6 +12,7 @@ from .factory import ProviderFactory
 from .detector import ProviderDetector
 from .gitlab import GitLabProvider
 from .github import GitHubProvider
+from .local import LocalGitProvider
 
 __all__ = [
     "GitProvider",
@@ -27,8 +28,10 @@ __all__ = [
     "ProviderDetector",
     "GitLabProvider",
     "GitHubProvider",
+    "LocalGitProvider",
 ]
 
 # Register providers
 ProviderFactory.register("gitlab", GitLabProvider)
 ProviderFactory.register("github", GitHubProvider)
+ProviderFactory.register("local", LocalGitProvider)
