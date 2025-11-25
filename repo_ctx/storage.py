@@ -158,25 +158,45 @@ class Storage:
             row = await cursor.fetchone()
             return row[0] if row else None
     
-    async def get_documents(self, version_id: int, topic: Optional[str] = None, page: int = 1, page_size: int = 10) -> list[Document]:
-        """Get documents for a version."""
-        offset = (page - 1) * page_size
+    async def get_documents(
+        self,
+        version_id: int,
+        topic: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 10,
+        max_tokens: Optional[int] = None
+    ) -> list[Document]:
+        """
+        Get documents for a version.
+
+        Args:
+            version_id: Version ID
+            topic: Optional topic filter
+            page: Page number (ignored if max_tokens is specified)
+            page_size: Documents per page (ignored if max_tokens is specified)
+            max_tokens: Maximum tokens to return (overrides page/page_size)
+
+        Returns:
+            List of documents, limited by max_tokens if specified
+        """
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
+
             if topic:
                 cursor = await db.execute(
-                    """SELECT * FROM documents 
+                    """SELECT * FROM documents
                        WHERE version_id = ? AND (file_path LIKE ? OR content LIKE ?)
-                       LIMIT ? OFFSET ?""",
-                    (version_id, f"%{topic}%", f"%{topic}%", page_size, offset)
+                       ORDER BY file_path""",
+                    (version_id, f"%{topic}%", f"%{topic}%")
                 )
             else:
                 cursor = await db.execute(
-                    "SELECT * FROM documents WHERE version_id = ? LIMIT ? OFFSET ?",
-                    (version_id, page_size, offset)
+                    "SELECT * FROM documents WHERE version_id = ? ORDER BY file_path",
+                    (version_id,)
                 )
+
             rows = await cursor.fetchall()
-            return [Document(
+            documents = [Document(
                 id=row["id"],
                 version_id=row["version_id"],
                 file_path=row["file_path"],
@@ -184,6 +204,25 @@ class Storage:
                 content_type=row["content_type"],
                 tokens=row["tokens"]
             ) for row in rows]
+
+            # Token-based limiting (preferred)
+            if max_tokens is not None:
+                result = []
+                total_tokens = 0
+
+                for doc in documents:
+                    doc_tokens = doc.tokens or len(doc.content) // 4
+                    if total_tokens + doc_tokens <= max_tokens:
+                        result.append(doc)
+                        total_tokens += doc_tokens
+                    else:
+                        break  # Stop when we'd exceed max_tokens
+
+                return result
+
+            # Fallback: Page-based limiting (backwards compatibility)
+            offset = (page - 1) * page_size
+            return documents[offset:offset + page_size]
     
     async def get_all_libraries(self) -> list[Library]:
         """Get all indexed libraries with metadata."""

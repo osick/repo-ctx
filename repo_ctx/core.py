@@ -219,7 +219,8 @@ class RepositoryContext:
         self,
         library_id: str,
         topic: Optional[str] = None,
-        page: int = 1
+        page: int = 1,
+        max_tokens: Optional[int] = None
     ) -> dict:
         """
         Get documentation for a library.
@@ -227,7 +228,8 @@ class RepositoryContext:
         Args:
             library_id: Library identifier (format: /group/project or /group/project/version)
             topic: Optional topic filter
-            page: Page number for pagination
+            page: Page number for pagination (ignored if max_tokens specified)
+            max_tokens: Maximum tokens to return (preferred over page-based)
 
         Returns:
             Documentation content and metadata
@@ -275,20 +277,36 @@ class RepositoryContext:
         if not version_id:
             raise ValueError(f"Version not found: {version}")
 
-        # Get documents
-        documents = await self.storage.get_documents(version_id, topic, page)
+        # Get documents (token-based if max_tokens specified)
+        documents = await self.storage.get_documents(
+            version_id,
+            topic,
+            page,
+            max_tokens=max_tokens
+        )
 
         # Format for LLM
         content = self.parser.format_for_llm(documents, library_id)
 
+        # Calculate actual tokens in returned content
+        actual_tokens = self.parser.count_tokens(content)
+
+        metadata = {
+            "library": f"{group}/{project}",
+            "version": version,
+            "documents_count": len(documents),
+            "tokens": actual_tokens
+        }
+
+        # Include pagination info if used
+        if max_tokens:
+            metadata["max_tokens"] = max_tokens
+        else:
+            metadata["page"] = page
+
         return {
             "content": [{"type": "text", "text": content}],
-            "metadata": {
-                "library": f"{group}/{project}",
-                "version": version,
-                "page": page,
-                "documents_count": len(documents)
-            }
+            "metadata": metadata
         }
 
     async def index_repository(

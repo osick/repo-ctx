@@ -135,7 +135,12 @@ Examples:
         "--page",
         type=int,
         default=1,
-        help="Page number (default: 1)"
+        help="Page number (default: 1, ignored if --max-tokens used)"
+    )
+    docs_parser.add_argument(
+        "--max-tokens",
+        type=int,
+        help="Maximum tokens to return (recommended for LLM context management)"
     )
 
     args = parser.parse_args()
@@ -188,7 +193,8 @@ Examples:
             storage_path=args.storage_path,
             repository=args.repository,
             topic=args.topic,
-            page=args.page
+            page=args.page,
+            max_tokens=args.max_tokens
         ))
     else:
         # Server mode (default)
@@ -429,7 +435,8 @@ async def docs_command(
     storage_path: str = None,
     repository: str = None,
     topic: str = None,
-    page: int = 1
+    page: int = 1,
+    max_tokens: int = None
 ):
     """Get documentation for a repository."""
     try:
@@ -456,24 +463,39 @@ async def docs_command(
         print(f"Retrieving documentation for {repository}...")
         if topic:
             print(f"Filtering by topic: {topic}")
+        if max_tokens:
+            print(f"Limiting to {max_tokens:,} tokens")
         print()
 
-        docs = await context.get_documentation(repository, topic=topic, page=page)
+        docs = await context.get_documentation(
+            repository,
+            topic=topic,
+            page=page,
+            max_tokens=max_tokens
+        )
 
         metadata = docs["metadata"]
         content = docs["content"][0]["text"]
 
         print(f"Library: {metadata['library']}")
         print(f"Version: {metadata['version']}")
-        print(f"Page: {metadata['page']}")
         print(f"Documents: {metadata['documents_count']}")
+        print(f"Tokens: {metadata['tokens']:,}")
+
+        if max_tokens:
+            print(f"Limit: {metadata['max_tokens']:,} tokens")
+        else:
+            print(f"Page: {metadata['page']}")
+
         print("=" * 80)
         print()
         print(content)
 
-        if metadata['documents_count'] >= 10:
+        # Pagination hint
+        if not max_tokens and metadata['documents_count'] >= 10:
             print()
             print(f"More documents available. Use --page {page + 1} to see next page.")
+            print(f"Or use --max-tokens to control output size (e.g., --max-tokens 8000)")
 
     except ValueError as e:
         print(f"Error: {e}")

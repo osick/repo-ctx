@@ -287,42 +287,47 @@ class TestParserFormatForLLM:
         self.parser = Parser()
 
     def test_format_for_llm_single_document(self):
-        """Test formatting a single document."""
+        """Test formatting a single document with enhanced structure."""
         doc = Document(
             version_id=1,
             file_path="README.md",
-            content="# Hello World\n\nTest content."
+            content="# Hello World\n\nThis is a test library that demonstrates formatting. It provides examples of how to use the API.\n\n```python\nimport example\nexample.hello()\n```"
         )
 
         result = self.parser.format_for_llm([doc], "/group/project")
 
-        assert "### README.md" in result
-        assert "Source: /group/project/README.md" in result
-        assert "# Hello World" in result
-        assert "Test content." in result
+        # New format: # {file_path} - {title}
+        assert "# README.md - Hello World" in result
+        assert "demonstrates formatting" in result
+        assert "## Code Examples" in result
+        assert "```python" in result
 
     def test_format_for_llm_multiple_documents(self):
-        """Test formatting multiple documents."""
+        """Test formatting multiple documents with enhanced structure."""
         docs = [
-            Document(version_id=1, file_path="doc1.md", content="Content 1"),
-            Document(version_id=1, file_path="doc2.md", content="Content 2"),
+            Document(version_id=1, file_path="doc1.md",
+                    content="# API Guide\n\nUse the API for data access. Connect using your API key.\n\n```python\napi.connect(key)\n```"),
+            Document(version_id=1, file_path="doc2.md",
+                    content="# Configuration\n\nConfigure the system using environment variables. Set API_KEY and API_URL.\n\n```bash\nexport API_KEY=xxx\n```"),
         ]
 
         result = self.parser.format_for_llm(docs, "/group/project")
 
-        assert "### doc1.md" in result
-        assert "### doc2.md" in result
-        assert "Content 1" in result
-        assert "Content 2" in result
+        assert "# doc1.md - API Guide" in result
+        assert "# doc2.md - Configuration" in result
+        assert "API for data access" in result
+        assert "environment variables" in result
+        assert "---" in result  # Separator between docs
 
     def test_format_for_llm_includes_separators(self):
-        """Test that formatted output includes separators."""
-        doc = Document(version_id=1, file_path="test.md", content="Test")
+        """Test that formatted output includes separators with enhanced structure."""
+        doc = Document(version_id=1, file_path="test.md",
+                      content="# Testing\n\nTest documentation with sufficient content to pass quality filters and demonstrate the separator feature.\n\n```python\ntest()\n```")
 
         result = self.parser.format_for_llm([doc], "/group/project")
 
-        # Should contain separator dashes
-        assert "---" in result or "-" * 32 in result
+        # Should contain separator (enhanced format uses ---)
+        assert "---" in result
 
     def test_format_for_llm_empty_list(self):
         """Test formatting empty document list."""
@@ -330,18 +335,19 @@ class TestParserFormatForLLM:
         assert result == ""
 
     def test_format_for_llm_preserves_content(self):
-        """Test that content is preserved exactly."""
+        """Test that code blocks are preserved in enhanced structure."""
         doc = Document(
             version_id=1,
             file_path="test.md",
-            content="**Bold** and *italic* text\n\n```python\ncode\n```"
+            content="# Formatting Test\n\nThis document demonstrates various formatting options. Use code blocks for examples.\n\n## Example\n```python\ncode = 'example'\nprint(code)\n```"
         )
 
         result = self.parser.format_for_llm([doc], "/group/project")
 
-        assert "**Bold**" in result
-        assert "*italic*" in result
+        # Enhanced format extracts and structures code blocks
         assert "```python" in result
+        assert "code" in result
+        assert "## Code Examples" in result
 
 
 class TestParserInitialization:
