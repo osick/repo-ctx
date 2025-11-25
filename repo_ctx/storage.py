@@ -163,8 +163,7 @@ class Storage:
         version_id: int,
         topic: Optional[str] = None,
         page: int = 1,
-        page_size: int = 10,
-        max_tokens: Optional[int] = None
+        page_size: int = 10
     ) -> list[Document]:
         """
         Get documents for a version.
@@ -172,12 +171,15 @@ class Storage:
         Args:
             version_id: Version ID
             topic: Optional topic filter
-            page: Page number (ignored if max_tokens is specified)
-            page_size: Documents per page (ignored if max_tokens is specified)
-            max_tokens: Maximum tokens to return (overrides page/page_size)
+            page: Page number for pagination
+            page_size: Documents per page
 
         Returns:
-            List of documents, limited by max_tokens if specified
+            List of documents (page-based pagination only)
+
+        Note:
+            Token-based limiting is now handled in core.py after formatting,
+            so quality filtering happens before token limiting.
         """
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
@@ -205,22 +207,11 @@ class Storage:
                 tokens=row["tokens"]
             ) for row in rows]
 
-            # Token-based limiting (preferred)
-            if max_tokens is not None:
-                result = []
-                total_tokens = 0
+            # Page-based limiting
+            # If page_size is very large (999+), return all (for token-based limiting in core)
+            if page_size >= 999:
+                return documents
 
-                for doc in documents:
-                    doc_tokens = doc.tokens or len(doc.content) // 4
-                    if total_tokens + doc_tokens <= max_tokens:
-                        result.append(doc)
-                        total_tokens += doc_tokens
-                    else:
-                        break  # Stop when we'd exceed max_tokens
-
-                return result
-
-            # Fallback: Page-based limiting (backwards compatibility)
             offset = (page - 1) * page_size
             return documents[offset:offset + page_size]
     

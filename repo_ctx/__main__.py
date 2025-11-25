@@ -479,7 +479,13 @@ async def docs_command(
 
         print(f"Library: {metadata['library']}")
         print(f"Version: {metadata['version']}")
-        print(f"Documents: {metadata['documents_count']}")
+        print(f"Documents: {metadata['documents_count']}", end="")
+
+        if max_tokens and 'documents_available' in metadata:
+            print(f" (of {metadata['documents_available']} available)")
+        else:
+            print()
+
         print(f"Tokens: {metadata['tokens']:,}")
 
         if max_tokens:

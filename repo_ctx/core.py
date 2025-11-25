@@ -277,32 +277,56 @@ class RepositoryContext:
         if not version_id:
             raise ValueError(f"Version not found: {version}")
 
-        # Get documents (token-based if max_tokens specified)
-        documents = await self.storage.get_documents(
-            version_id,
-            topic,
-            page,
-            max_tokens=max_tokens
-        )
-
-        # Format for LLM
-        content = self.parser.format_for_llm(documents, library_id)
-
-        # Calculate actual tokens in returned content
-        actual_tokens = self.parser.count_tokens(content)
-
-        metadata = {
-            "library": f"{group}/{project}",
-            "version": version,
-            "documents_count": len(documents),
-            "tokens": actual_tokens
-        }
-
-        # Include pagination info if used
+        # Get documents (all if token-based, paginated if page-based)
         if max_tokens:
-            metadata["max_tokens"] = max_tokens
+            # Get all documents for token-based limiting
+            documents = await self.storage.get_documents(version_id, topic, page=1, page_size=9999)
         else:
-            metadata["page"] = page
+            # Get paginated documents
+            documents = await self.storage.get_documents(version_id, topic, page)
+
+        # Token-based limiting: format incrementally if max_tokens specified
+        if max_tokens:
+            # Format documents one by one and accumulate until token limit
+            formatted_docs = []
+            total_tokens = 0
+
+            for doc in documents:
+                # Format this single document
+                single_doc_content = self.parser.format_for_llm([doc], library_id)
+                doc_tokens = self.parser.count_tokens(single_doc_content)
+
+                # Check if adding this document would exceed limit
+                if total_tokens + doc_tokens <= max_tokens:
+                    formatted_docs.append(doc)
+                    total_tokens += doc_tokens
+                else:
+                    break  # Stop when limit reached
+
+            # Format the selected documents
+            content = self.parser.format_for_llm(formatted_docs, library_id)
+            actual_tokens = self.parser.count_tokens(content)
+
+            metadata = {
+                "library": f"{group}/{project}",
+                "version": version,
+                "documents_count": len(formatted_docs),
+                "tokens": actual_tokens,
+                "max_tokens": max_tokens,
+                "documents_available": len(documents)
+            }
+        else:
+            # Page-based: format all retrieved documents
+            content = self.parser.format_for_llm(documents, library_id)
+            actual_tokens = self.parser.count_tokens(content)
+
+            metadata = {
+                "library": f"{group}/{project}",
+                "version": version,
+                "documents_count": len(documents),
+                "tokens": actual_tokens,
+                "page": page
+            }
 
         return {
             "content": [{"type": "text", "text": content}],

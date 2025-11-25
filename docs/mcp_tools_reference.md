@@ -389,7 +389,21 @@ When you specify a provider filter, only repositories matching that provider wil
 |-----------|------|----------|---------|-------------|
 | `libraryId` | string | ✅ Yes | - | Library ID in format `/group/project` or `/group/project/version` |
 | `topic` | string | ❌ No | - | Filter by topic (matches file path) |
-| `page` | integer | ❌ No | 1 | Page number for pagination |
+| `maxTokens` | integer | ❌ No | - | **Recommended:** Maximum tokens to return (e.g., 8000 for most models, 50000 for long-context models). If specified, `page` is ignored. |
+| `page` | integer | ❌ No | 1 | Page number for pagination (ignored if `maxTokens` is specified) |
+
+### Token-Based vs Page-Based Retrieval
+
+**Token-Based (Recommended):**
+- Use `maxTokens` to control output size based on your LLM's context window
+- More predictable and efficient than arbitrary page numbers
+- Quality filtering applied before token limiting
+- Example: `maxTokens: 8000` returns up to 8000 tokens of high-quality documentation
+
+**Page-Based (Legacy):**
+- Use `page` for simple pagination (10 documents per page)
+- Less control over actual output size
+- Use when you need to browse through all documents sequentially
 
 ### Library ID Formats
 

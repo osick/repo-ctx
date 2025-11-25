@@ -129,7 +129,7 @@ async def serve(
             ),
             Tool(
                 name="repo-ctx-docs",
-                description="Retrieve documentation for a specific indexed repository. Supports topic filtering and pagination. Works with any indexed repository (local, GitHub, GitLab).",
+                description="Retrieve documentation for a specific indexed repository. Supports topic filtering and token-based limiting (recommended) or page-based pagination. Works with any indexed repository (local, GitHub, GitLab).",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -141,9 +141,13 @@ async def serve(
                             "type": "string",
                             "description": "Optional topic to filter documentation"
                         },
+                        "maxTokens": {
+                            "type": "integer",
+                            "description": "Maximum tokens to return (recommended for LLM context management, e.g., 8000 for most models, 50000 for long-context models). If specified, page parameter is ignored."
+                        },
                         "page": {
                             "type": "integer",
-                            "description": "Page number for pagination (default: 1)",
+                            "description": "Page number for pagination (default: 1). Ignored if maxTokens is specified.",
                             "default": 1
                         }
                     },
@@ -277,9 +281,15 @@ async def serve(
             library_id = arguments["libraryId"]
             topic = arguments.get("topic")
             page = arguments.get("page", 1)
+            max_tokens = arguments.get("maxTokens")
 
             try:
-                result = await context.get_documentation(library_id, topic, page)
+                result = await context.get_documentation(
+                    library_id,
+                    topic,
+                    page,
+                    max_tokens=max_tokens
+                )
                 return [TextContent(type="text", text=result["content"][0]["text"])]
             except Exception as e:
                 return [TextContent(type="text", text=f"Error: {str(e)}")]
