@@ -289,8 +289,12 @@ class GitHubProvider(GitProvider):
             repo = self.client.get_repo(project.path)
             tags = repo.get_tags()
 
-            # Get first N tags (already sorted by date descending)
-            tag_names = [tag.name for tag in tags[:limit]]
+            # Safely iterate and collect tags (handles empty repos)
+            tag_names = []
+            for i, tag in enumerate(tags):
+                if i >= limit:
+                    break
+                tag_names.append(tag.name)
 
             return tag_names
 

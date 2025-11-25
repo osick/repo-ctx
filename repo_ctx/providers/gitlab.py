@@ -258,7 +258,12 @@ class GitLabProvider(GitProvider):
             tags = gitlab_project.tags.list(all=True)
 
             # GitLab returns tags in reverse chronological order by default
-            tag_names = [tag.name for tag in tags[:limit]]
+            # Safely iterate and collect tags (handles empty repos)
+            tag_names = []
+            for i, tag in enumerate(tags):
+                if i >= limit:
+                    break
+                tag_names.append(tag.name)
 
             return tag_names
 
