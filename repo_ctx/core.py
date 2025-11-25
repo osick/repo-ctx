@@ -140,6 +140,81 @@ class RepositoryContext:
         """Fuzzy search for libraries."""
         return await self.storage.fuzzy_search(query, limit)
 
+    def _get_repository_url(self, lib: Library) -> str:
+        """
+        Get the URL or file path for a repository.
+
+        Args:
+            lib: Library object
+
+        Returns:
+            URL for remote repos, file path for local repos
+        """
+        # Detect provider from path format
+        if lib.group_name.startswith("/") or lib.group_name.startswith("~"):
+            # Local repository - return the file path
+            if lib.project_name:
+                return f"{lib.group_name}/{lib.project_name}"
+            return lib.group_name
+
+        # Check if it's GitHub (2 parts)
+        library_id = f"/{lib.group_name}/{lib.project_name}"
+        parts = library_id.strip("/").split("/")
+
+        if len(parts) == 2:
+            # Likely GitHub
+            return f"https://github.com/{lib.group_name}/{lib.project_name}"
+        else:
+            # Likely GitLab - use configured URL if available
+            if self.config.gitlab_url:
+                return f"{self.config.gitlab_url}/{lib.group_name}/{lib.project_name}"
+            # Otherwise just return the path
+            return f"/{lib.group_name}/{lib.project_name}"
+
+    async def list_all_libraries(self, provider_filter: Optional[str] = None) -> list[Library]:
+        """
+        List all indexed libraries.
+
+        Args:
+            provider_filter: Optional provider filter ('local', 'github', 'gitlab')
+
+        Returns:
+            List of Library objects with metadata
+        """
+        libraries = await self.storage.get_all_libraries()
+
+        # Filter by provider if requested
+        if provider_filter:
+            filtered = []
+            for lib in libraries:
+                # Detect provider from library ID format
+                library_id = f"/{lib.group_name}/{lib.project_name}"
+                detected = ProviderDetector.detect(library_id)
+
+                # For stored libraries, we need to check the path format
+                # Local: starts with / and is a file path
+                # GitHub: typically 2 parts (owner/repo)
+                # GitLab: typically 3+ parts or configured domains
+
+                if provider_filter == "local":
+                    # Local repos have absolute paths as group_name
+                    if lib.group_name.startswith("/") or lib.group_name.startswith("~"):
+                        filtered.append(lib)
+                elif provider_filter == "github":
+                    # GitHub: 2-part names without / prefix (owner/repo)
+                    parts = library_id.strip("/").split("/")
+                    if len(parts) == 2 and not lib.group_name.startswith("/"):
+                        filtered.append(lib)
+                elif provider_filter == "gitlab":
+                    # GitLab: 3+ parts or specific patterns
+                    parts = library_id.strip("/").split("/")
+                    if len(parts) >= 3 and not lib.group_name.startswith("/"):
+                        filtered.append(lib)
+
+            return filtered
+
+        return libraries
+
     async def get_documentation(
         self,
         library_id: str,

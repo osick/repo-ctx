@@ -112,6 +112,11 @@ Examples:
         default="detailed",
         help="Output format (default: detailed)"
     )
+    list_parser.add_argument(
+        "--provider",
+        choices=["local", "github", "gitlab"],
+        help="Filter by provider (local, github, or gitlab)"
+    )
 
     # Docs command
     docs_parser = subparsers.add_parser(
@@ -170,7 +175,8 @@ Examples:
             github_url=args.github_url,
             github_token=args.github_token,
             storage_path=args.storage_path,
-            format_type=args.format
+            format_type=args.format,
+            provider=args.provider
         ))
     elif args.command == "docs":
         asyncio.run(docs_command(
@@ -334,7 +340,8 @@ async def list_command(
     github_url: str = None,
     github_token: str = None,
     storage_path: str = None,
-    format_type: str = "detailed"
+    format_type: str = "detailed",
+    provider: str = None
 ):
     """List all indexed repositories."""
     try:
@@ -354,15 +361,22 @@ async def list_command(
     await context.init()
 
     try:
-        libraries = await context.storage.get_all_libraries()
+        # Use the new list_all_libraries method with provider filtering
+        libraries = await context.list_all_libraries(provider_filter=provider)
 
         if not libraries:
-            print("No indexed repositories found.")
+            if provider:
+                print(f"No indexed repositories found for provider '{provider}'.")
+            else:
+                print("No indexed repositories found.")
             print("\nTo index a repository, run:")
             print("  repo-ctx --index group/project")
             return
 
-        print(f"Indexed Repositories ({len(libraries)}):\n")
+        if provider:
+            print(f"Indexed Repositories ({provider} provider, {len(libraries)} total):\n")
+        else:
+            print(f"Indexed Repositories ({len(libraries)}):\n")
 
         if format_type == "simple":
             for lib in libraries:
@@ -374,6 +388,10 @@ async def list_command(
                 # Clean up path display
                 path = _format_repo_path(lib.group_name, lib.project_name)
                 print(f"{i}. {path}")
+
+                # Show URL or file path
+                url = context._get_repository_url(lib)
+                print(f"   URL: {url}")
 
                 if lib.description:
                     # Clean HTML/markdown tags and truncate

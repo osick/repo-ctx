@@ -40,7 +40,7 @@ uv pip install -e .
 
 ## MCP Tools Overview
 
-repo-ctx provides **5 MCP tools** for seamless integration with AI assistants like Claude Code, Kiro CLI, and GitHub Copilot.
+repo-ctx provides **6 MCP tools** for seamless integration with AI assistants like Claude Code, Kiro CLI, and GitHub Copilot.
 
 ### Workflow Diagram
 
@@ -52,27 +52,27 @@ graph TB
 
     Ready --> Index{Index Repositories}
 
-    Index --> |Local repos| IndexLocal[gitlab-index-repository<br/>/path/to/repo]
-    Index --> |GitHub public| IndexGH[gitlab-index-repository<br/>owner/repo]
-    Index --> |GitLab| IndexGL[gitlab-index-repository<br/>group/project]
-    Index --> |Entire org| IndexGroup[gitlab-index-group<br/>organization]
+    Index --> |Local repos| IndexLocal[repo-ctx-index<br/>/path/to/repo]
+    Index --> |GitHub public| IndexGH[repo-ctx-index<br/>owner/repo]
+    Index --> |GitLab| IndexGL[repo-ctx-index<br/>group/project]
+    Index --> |Entire org| IndexGroup[repo-ctx-index-group<br/>organization]
 
     IndexLocal --> Search
     IndexGH --> Search
     IndexGL --> Search
     IndexGroup --> Search
 
-    Search[Search for Documentation] --> FuzzySearch[gitlab-fuzzy-search<br/>query: 'authentication']
-    Search --> ExactSearch[gitlab-search-libraries<br/>libraryName: 'fastapi']
+    Search[Search for Documentation] --> FuzzySearch[repo-ctx-fuzzy-search<br/>query: 'authentication']
+    Search --> ExactSearch[repo-ctx-search<br/>libraryName: 'fastapi']
 
     FuzzySearch --> Results[Search Results<br/>with Library IDs]
     ExactSearch --> Results
 
-    Results --> GetDocs[gitlab-get-docs<br/>libraryId: '/owner/repo']
+    Results --> GetDocs[repo-ctx-docs<br/>libraryId: '/owner/repo']
 
-    GetDocs --> |Filter by topic| GetDocsFiltered[gitlab-get-docs<br/>topic: 'api']
-    GetDocs --> |Specific version| GetDocsVersion[gitlab-get-docs<br/>libraryId: '/owner/repo/v1.0.0']
-    GetDocs --> |Pagination| GetDocsPaged[gitlab-get-docs<br/>page: 2]
+    GetDocs --> |Filter by topic| GetDocsFiltered[repo-ctx-docs<br/>topic: 'api']
+    GetDocs --> |Specific version| GetDocsVersion[repo-ctx-docs<br/>libraryId: '/owner/repo/v1.0.0']
+    GetDocs --> |Pagination| GetDocsPaged[repo-ctx-docs<br/>page: 2]
 
     GetDocsFiltered --> Docs[Documentation Content<br/>in Markdown]
     GetDocsVersion --> Docs
@@ -93,11 +93,12 @@ graph TB
 
 | Tool | Purpose | Example |
 |------|---------|---------|
-| **gitlab-index-repository** | Index a single repository | Index `fastapi/fastapi` from GitHub |
-| **gitlab-index-group** | Index entire organization/group | Index all repos in `microsoft` org |
-| **gitlab-fuzzy-search** | Search with typo tolerance | Search `"fasapi"` → finds `"fastapi"` |
-| **gitlab-search-libraries** | Exact name search | Search for `"fastapi"` library |
-| **gitlab-get-docs** | Retrieve documentation | Get docs for `/fastapi/fastapi` |
+| **repo-ctx-index** | Index a single repository | Index `fastapi/fastapi` from GitHub |
+| **repo-ctx-index-group** | Index entire organization/group | Index all repos in `microsoft` org |
+| **repo-ctx-list** | List all indexed repositories | List all indexed repos, optionally by provider |
+| **repo-ctx-fuzzy-search** | Search with typo tolerance | Search `"fasapi"` → finds `"fastapi"` |
+| **repo-ctx-search** | Exact name search | Search for `"fastapi"` library |
+| **repo-ctx-docs** | Retrieve documentation | Get docs for `/fastapi/fastapi` |
 
 **📚 Complete Tool Reference:** See [MCP Tools Reference](docs/mcp_tools_reference.md) for detailed parameters, examples, and best practices.
 
@@ -105,21 +106,32 @@ graph TB
 
 **Index a local repository:**
 ```javascript
-await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index", {
   repository: "/home/user/projects/my-app"
 });
 ```
 
 **Index a GitHub public repo (no token needed):**
 ```javascript
-await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index", {
   repository: "fastapi/fastapi"
+});
+```
+
+**List all indexed repositories:**
+```javascript
+// List all repositories
+await use_mcp_tool("repo-ctx", "repo-ctx-list", {});
+
+// List only GitHub repositories
+await use_mcp_tool("repo-ctx", "repo-ctx-list", {
+  provider: "github"
 });
 ```
 
 **Search for documentation:**
 ```javascript
-const results = await use_mcp_tool("repo-ctx", "gitlab-fuzzy-search", {
+const results = await use_mcp_tool("repo-ctx", "repo-ctx-fuzzy-search", {
   query: "authentication",
   limit: 5
 });
@@ -128,7 +140,7 @@ const results = await use_mcp_tool("repo-ctx", "gitlab-fuzzy-search", {
 
 **Retrieve documentation:**
 ```javascript
-const docs = await use_mcp_tool("repo-ctx", "gitlab-get-docs", {
+const docs = await use_mcp_tool("repo-ctx", "repo-ctx-docs", {
   libraryId: "/mygroup/auth-service",
   topic: "api"  // Optional: filter by topic
 });
@@ -531,13 +543,14 @@ For complete MCP tool documentation including workflow diagrams, examples, and b
 
 | Tool | Purpose |
 |------|---------|
-| `gitlab-index-repository` | Index single repository (local, GitHub, GitLab) |
-| `gitlab-index-group` | Index entire organization/group |
-| `gitlab-fuzzy-search` | Search with typo tolerance |
-| `gitlab-search-libraries` | Exact name search |
-| `gitlab-get-docs` | Retrieve documentation content |
+| `repo-ctx-index` | Index single repository (local, GitHub, GitLab) |
+| `repo-ctx-index-group` | Index entire organization/group |
+| `repo-ctx-list` | List all indexed repositories (with optional provider filter) |
+| `repo-ctx-fuzzy-search` | Search with typo tolerance |
+| `repo-ctx-search` | Exact name search |
+| `repo-ctx-docs` | Retrieve documentation content |
 
-**Note:** Despite the `gitlab-` prefix, all tools support **local, GitHub, and GitLab** repositories.
+**Note:** All tools support **local, GitHub, and GitLab** repositories with auto-detection or explicit provider selection.
 
 ## Architecture
 

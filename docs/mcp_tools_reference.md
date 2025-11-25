@@ -6,19 +6,20 @@ Complete reference for all MCP tools provided by the repo-ctx server.
 
 ## Overview
 
-repo-ctx provides **5 MCP tools** for repository documentation indexing and retrieval:
+repo-ctx provides **6 MCP tools** for repository documentation indexing and retrieval:
 
-1. **gitlab-search-libraries** - Search for indexed repositories
-2. **gitlab-fuzzy-search** - Fuzzy/typo-tolerant search
-3. **gitlab-index-repository** - Index a single repository
-4. **gitlab-index-group** - Index all repositories in a group/organization
-5. **gitlab-get-docs** - Retrieve documentation content
+1. **repo-ctx-search** - Search for indexed repositories
+2. **repo-ctx-fuzzy-search** - Fuzzy/typo-tolerant search
+3. **repo-ctx-index** - Index a single repository
+4. **repo-ctx-index-group** - Index all repositories in a group/organization
+5. **repo-ctx-list** - List all indexed repositories
+6. **repo-ctx-docs** - Retrieve documentation content
 
-**Note:** Despite the "gitlab-" prefix, all tools support **GitLab, GitHub, and local Git repositories**.
+**Note:** All tools support **GitLab, GitHub, and local Git repositories** with auto-detection or explicit provider selection.
 
 ---
 
-## 1. gitlab-search-libraries
+## 1. repo-ctx-search
 
 **Purpose:** Search for indexed repositories by exact name match.
 
@@ -42,7 +43,7 @@ List of matching libraries with:
 
 ```javascript
 // Search for a specific library
-const results = await use_mcp_tool("repo-ctx", "gitlab-search-libraries", {
+const results = await use_mcp_tool("repo-ctx", "repo-ctx-search", {
   libraryName: "fastapi"
 });
 ```
@@ -65,7 +66,7 @@ Available Libraries (search results):
 
 ---
 
-## 2. gitlab-fuzzy-search
+## 2. repo-ctx-fuzzy-search
 
 **Purpose:** Fuzzy/typo-tolerant search for repositories with ranking.
 
@@ -93,13 +94,13 @@ Ranked list of matching repositories with:
 
 ```javascript
 // Fuzzy search with typos
-const results = await use_mcp_tool("repo-ctx", "gitlab-fuzzy-search", {
+const results = await use_mcp_tool("repo-ctx", "repo-ctx-fuzzy-search", {
   query: "fasapi",  // Typo: missing 't'
   limit: 5
 });
 
 // Search by partial name
-const results2 = await use_mcp_tool("repo-ctx", "gitlab-fuzzy-search", {
+const results2 = await use_mcp_tool("repo-ctx", "repo-ctx-fuzzy-search", {
   query: "api",
   limit: 10
 });
@@ -122,12 +123,12 @@ Fuzzy search results for 'fasapi':
    Description: Internal FastAPI microservice
    Match: contains in name (score: 0.70)
 
-To get documentation, use gitlab-get-docs with one of the Library IDs above.
+To get documentation, use repo-ctx-docs with one of the Library IDs above.
 ```
 
 ---
 
-## 3. gitlab-index-repository
+## 3. repo-ctx-index
 
 **Purpose:** Index a single repository to make its documentation searchable.
 
@@ -155,39 +156,39 @@ Success or error message with details about the indexing operation.
 
 ```javascript
 // Auto-detect provider (Local - absolute path)
-await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index", {
   repository: "/home/user/projects/my-app"
 });
 
 // Auto-detect provider (Local - relative path)
-await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index", {
   repository: "~/projects/my-app"
 });
 
 // Auto-detect provider (GitHub - 2 parts)
-await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index", {
   repository: "fastapi/fastapi"
 });
 
 // Auto-detect provider (GitLab - 3 parts)
-await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index", {
   repository: "mygroup/subgroup/project"
 });
 
 // Explicitly use local
-await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index", {
   repository: "/path/to/repo",
   provider: "local"
 });
 
 // Explicitly use GitHub
-await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index", {
   repository: "microsoft/vscode",
   provider: "github"
 });
 
 // Explicitly use GitLab
-await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index", {
   repository: "mygroup/myproject",
   provider: "gitlab"
 });
@@ -197,7 +198,7 @@ await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
 
 ```
 Successfully indexed fastapi/fastapi using github provider.
-You can now search for it using gitlab-fuzzy-search or gitlab-get-docs.
+You can now search for it using repo-ctx-fuzzy-search or repo-ctx-docs.
 ```
 
 ### What Gets Indexed
@@ -209,7 +210,7 @@ You can now search for it using gitlab-fuzzy-search or gitlab-get-docs.
 
 ---
 
-## 4. gitlab-index-group
+## 4. repo-ctx-index-group
 
 **Purpose:** Index all repositories in a GitLab group or GitHub organization.
 
@@ -242,20 +243,20 @@ Summary with:
 
 ```javascript
 // Index GitHub organization
-await use_mcp_tool("repo-ctx", "gitlab-index-group", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index-group", {
   group: "microsoft",
   provider: "github"
 });
 
 // Index GitLab group with subgroups
-await use_mcp_tool("repo-ctx", "gitlab-index-group", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index-group", {
   group: "mycompany",
   includeSubgroups: true,
   provider: "gitlab"
 });
 
 // Index GitLab group without subgroups
-await use_mcp_tool("repo-ctx", "gitlab-index-group", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index-group", {
   group: "mygroup",
   includeSubgroups: false,
   provider: "gitlab"
@@ -292,7 +293,91 @@ Failed repositories:
 
 ---
 
-## 5. gitlab-get-docs
+## 5. repo-ctx-list
+
+**Purpose:** List all indexed repositories with metadata (name, description, versions, last indexed date).
+
+**When to use:** When you want to see what repositories are available in your index, or filter by provider to see only local, GitHub, or GitLab repositories.
+
+### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | string | ❌ No | - | Optional filter: 'local', 'github', or 'gitlab' |
+
+### Returns
+
+List of all indexed repositories with:
+- Library ID (format: `/group/project`)
+- Description
+- Default version
+- Last indexed timestamp
+
+### Example Usage
+
+```javascript
+// List all indexed repositories
+await use_mcp_tool("repo-ctx", "repo-ctx-list", {});
+
+// List only local repositories
+await use_mcp_tool("repo-ctx", "repo-ctx-list", {
+  provider: "local"
+});
+
+// List only GitHub repositories
+await use_mcp_tool("repo-ctx", "repo-ctx-list", {
+  provider: "github"
+});
+
+// List only GitLab repositories
+await use_mcp_tool("repo-ctx", "repo-ctx-list", {
+  provider: "gitlab"
+});
+```
+
+### Example Output
+
+```
+All indexed repositories (4 total):
+
+1. /home/user/projects/my-app
+   URL: /home/user/projects/my-app
+   Description: My Local Application
+   Default version: main
+   Last indexed: 2025-11-25 14:30:00
+
+2. /fastapi/fastapi
+   URL: https://github.com/fastapi/fastapi
+   Description: FastAPI framework for building APIs
+   Default version: main
+   Last indexed: 2025-11-25 10:15:00
+
+3. /mygroup/subgroup/project
+   URL: https://gitlab.company.com/mygroup/subgroup/project
+   Description: Internal project documentation
+   Default version: main
+   Last indexed: 2025-11-24 16:20:00
+
+4. /microsoft/vscode
+   URL: https://github.com/microsoft/vscode
+   Description: Visual Studio Code
+   Default version: main
+   Last indexed: 2025-11-23 09:45:00
+```
+
+### Provider Filtering
+
+The tool automatically detects the provider for each repository based on its path format:
+
+- **Local:** Repositories with paths starting with `/` or `~`
+- **GitHub:** Two-part names like `owner/repo`
+- **GitLab:** Three or more parts like `group/subgroup/project`
+
+When you specify a provider filter, only repositories matching that provider will be returned.
+
+---
+
+## 6. repo-ctx-docs
 
 **Purpose:** Retrieve documentation content for an indexed repository.
 
@@ -327,29 +412,29 @@ Formatted documentation content including:
 
 ```javascript
 // Get all documentation (default version)
-await use_mcp_tool("repo-ctx", "gitlab-get-docs", {
+await use_mcp_tool("repo-ctx", "repo-ctx-docs", {
   libraryId: "/fastapi/fastapi"
 });
 
 // Get specific version
-await use_mcp_tool("repo-ctx", "gitlab-get-docs", {
+await use_mcp_tool("repo-ctx", "repo-ctx-docs", {
   libraryId: "/fastapi/fastapi/v0.109.0"
 });
 
 // Filter by topic (file path)
-await use_mcp_tool("repo-ctx", "gitlab-get-docs", {
+await use_mcp_tool("repo-ctx", "repo-ctx-docs", {
   libraryId: "/mygroup/myproject",
   topic: "api"  // Matches files with 'api' in path
 });
 
 // Pagination (10 docs per page)
-await use_mcp_tool("repo-ctx", "gitlab-get-docs", {
+await use_mcp_tool("repo-ctx", "repo-ctx-docs", {
   libraryId: "/mygroup/myproject",
   page: 2
 });
 
 // Combine filters
-await use_mcp_tool("repo-ctx", "gitlab-get-docs", {
+await use_mcp_tool("repo-ctx", "repo-ctx-docs", {
   libraryId: "/mygroup/myproject/v1.0.0",
   topic: "tutorial",
   page: 1
@@ -403,13 +488,13 @@ More documents available. Use --page 2 to see next page.
 
 ```javascript
 // Index individual repositories
-await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index", {
   repository: "fastapi/fastapi",
   provider: "github"
 });
 
 // Or index entire organization
-await use_mcp_tool("repo-ctx", "gitlab-index-group", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index-group", {
   group: "mycompany",
   provider: "gitlab"
 });
@@ -419,7 +504,7 @@ await use_mcp_tool("repo-ctx", "gitlab-index-group", {
 
 ```javascript
 // Fuzzy search to find repositories
-const results = await use_mcp_tool("repo-ctx", "gitlab-fuzzy-search", {
+const results = await use_mcp_tool("repo-ctx", "repo-ctx-fuzzy-search", {
   query: "authentication",
   limit: 5
 });
@@ -431,7 +516,7 @@ const results = await use_mcp_tool("repo-ctx", "gitlab-fuzzy-search", {
 
 ```javascript
 // Get documentation for found repository
-const docs = await use_mcp_tool("repo-ctx", "gitlab-get-docs", {
+const docs = await use_mcp_tool("repo-ctx", "repo-ctx-docs", {
   libraryId: "/mygroup/auth-service"
 });
 ```
@@ -510,10 +595,10 @@ const docs = await use_mcp_tool("repo-ctx", "gitlab-get-docs", {
 - Unauthenticated mode: 60 requests/hour rate limit
 
 **"No results found"**
-- Solution: Index the repository first using gitlab-index-repository
+- Solution: Index the repository first using repo-ctx-index
 
 **"Version not found"**
-- Solution: Check available versions with gitlab-search-libraries
+- Solution: Check available versions with repo-ctx-search
 
 **"Path is not a Git repository"**
 - Solution: Ensure the path contains a `.git` directory
@@ -525,10 +610,10 @@ const docs = await use_mcp_tool("repo-ctx", "gitlab-get-docs", {
 
 ### 1. Search Before Indexing
 
-Use `gitlab-fuzzy-search` to check if a repository is already indexed:
+Use `repo-ctx-fuzzy-search` to check if a repository is already indexed:
 
 ```javascript
-const results = await use_mcp_tool("repo-ctx", "gitlab-fuzzy-search", {
+const results = await use_mcp_tool("repo-ctx", "repo-ctx-fuzzy-search", {
   query: "fastapi"
 });
 // If found, no need to index again
@@ -536,20 +621,20 @@ const results = await use_mcp_tool("repo-ctx", "gitlab-fuzzy-search", {
 
 ### 2. Index in Batches
 
-When indexing many repositories, use `gitlab-index-group` instead of multiple `gitlab-index-repository` calls:
+When indexing many repositories, use `repo-ctx-index-group` instead of multiple `repo-ctx-index` calls:
 
 ```javascript
 // ✅ Better
-await use_mcp_tool("repo-ctx", "gitlab-index-group", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index-group", {
   group: "mycompany",
   provider: "gitlab"
 });
 
 // ❌ Slower
-await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index", {
   repository: "mycompany/repo1"
 });
-await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index", {
   repository: "mycompany/repo2"
 });
 // ... many more calls
@@ -573,7 +658,7 @@ Use topic filtering to get relevant sections:
 
 ```javascript
 // Get only API documentation
-await use_mcp_tool("repo-ctx", "gitlab-get-docs", {
+await use_mcp_tool("repo-ctx", "repo-ctx-docs", {
   libraryId: "/mygroup/myproject",
   topic: "api"
 });
@@ -585,12 +670,12 @@ Use explicit provider when path format is ambiguous:
 
 ```javascript
 // Without provider, 2 parts = GitHub
-await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index", {
   repository: "group/project"  // → GitHub (wrong!)
 });
 
 // With explicit provider
-await use_mcp_tool("repo-ctx", "gitlab-index-repository", {
+await use_mcp_tool("repo-ctx", "repo-ctx-index", {
   repository: "group/project",
   provider: "gitlab"  // ✅ Correct
 });
@@ -636,7 +721,7 @@ let page = 1;
 let hasMore = true;
 
 while (hasMore) {
-  const docs = await use_mcp_tool("repo-ctx", "gitlab-get-docs", {
+  const docs = await use_mcp_tool("repo-ctx", "repo-ctx-docs", {
     libraryId: "/mygroup/large-project",
     page: page
   });
@@ -652,9 +737,9 @@ while (hasMore) {
 
 ---
 
-## Tool Name Note
+## Tool Naming
 
-All tools have the `gitlab-` prefix for **historical reasons** (repo-ctx was initially GitLab-focused). However, all tools now support **GitLab, GitHub, and local Git repositories**. The prefix may be updated in a future version with backward-compatible aliases.
+All tools use the `repo-ctx-` prefix to indicate they are part of the repo-ctx project and work across **all providers** (GitLab, GitHub, and local Git repositories). The naming emphasizes the multi-provider nature of the tool.
 
 ---
 
@@ -662,11 +747,12 @@ All tools have the `gitlab-` prefix for **historical reasons** (repo-ctx was ini
 
 | Tool | Purpose | Key Parameters | Provider Support |
 |------|---------|----------------|------------------|
-| `gitlab-search-libraries` | Exact name search | `libraryName` | All (searches all indexed repos) |
-| `gitlab-fuzzy-search` | Fuzzy/typo-tolerant search | `query`, `limit` | All (searches all indexed repos) |
-| `gitlab-index-repository` | Index single repo | `repository`, `provider` | GitLab, GitHub, Local |
-| `gitlab-index-group` | Index group/org | `group`, `includeSubgroups`, `provider` | GitLab, GitHub (not Local) |
-| `gitlab-get-docs` | Get documentation | `libraryId`, `topic`, `page` | All (retrieves any indexed repo) |
+| `repo-ctx-search` | Exact name search | `libraryName` | All (searches all indexed repos) |
+| `repo-ctx-fuzzy-search` | Fuzzy/typo-tolerant search | `query`, `limit` | All (searches all indexed repos) |
+| `repo-ctx-index` | Index single repo | `repository`, `provider` | GitLab, GitHub, Local |
+| `repo-ctx-index-group` | Index group/org | `group`, `includeSubgroups`, `provider` | GitLab, GitHub (not Local) |
+| `repo-ctx-list` | List indexed repos | `provider` (optional) | All (shows all indexed repos, filterable) |
+| `repo-ctx-docs` | Get documentation | `libraryId`, `topic`, `page` | All (retrieves any indexed repo) |
 
 **Provider Configuration:**
 - **Local:** No configuration required ✅

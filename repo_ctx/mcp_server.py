@@ -50,22 +50,22 @@ async def serve(
     async def list_tools() -> list[Tool]:
         return [
             Tool(
-                name="gitlab-search-libraries",
-                description="Search for GitLab libraries/projects by name. Returns matching libraries with their IDs and available versions.",
+                name="repo-ctx-search",
+                description="Search for indexed repositories by exact name match. Returns matching repositories with their IDs and available versions. Works across all providers (local, GitHub, GitLab).",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "libraryName": {
                             "type": "string",
-                            "description": "Library name to search for"
+                            "description": "Repository name to search for"
                         }
                     },
                     "required": ["libraryName"]
                 }
             ),
             Tool(
-                name="gitlab-fuzzy-search",
-                description="Fuzzy search for GitLab repositories. Returns top matches even with typos or partial names. Use this when you don't know the exact repository path.",
+                name="repo-ctx-fuzzy-search",
+                description="Fuzzy search for repositories with typo tolerance. Returns top matches even with partial names or typos. Use this when you don't know the exact repository path. Works across all indexed repositories (local, GitHub, GitLab).",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -83,19 +83,19 @@ async def serve(
                 }
             ),
             Tool(
-                name="gitlab-index-repository",
-                description="Index a repository from GitLab or GitHub to make its documentation searchable. Use format: group/project for GitLab, owner/repo for GitHub",
+                name="repo-ctx-index",
+                description="Index a repository to make its documentation searchable. Supports local Git repositories (absolute/relative paths), GitHub (owner/repo), and GitLab (group/project). Auto-detects provider from path format.",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "repository": {
                             "type": "string",
-                            "description": "Repository path (e.g., 'group/repo' or 'owner/repo')"
+                            "description": "Repository path: '/path/to/local/repo', 'owner/repo' (GitHub), or 'group/project' (GitLab)"
                         },
                         "provider": {
                             "type": "string",
-                            "description": "Provider to use: 'gitlab', 'github', or 'auto' for auto-detection (default: auto)",
-                            "enum": ["gitlab", "github", "auto"],
+                            "description": "Provider to use: 'local', 'gitlab', 'github', or 'auto' for auto-detection (default: auto)",
+                            "enum": ["local", "gitlab", "github", "auto"],
                             "default": "auto"
                         }
                     },
@@ -103,8 +103,8 @@ async def serve(
                 }
             ),
             Tool(
-                name="gitlab-index-group",
-                description="Index all repositories in a GitLab group or GitHub organization. Optionally include subgroups (GitLab only).",
+                name="repo-ctx-index-group",
+                description="Index all repositories in a GitLab group or GitHub organization. Optionally include subgroups (GitLab only). Not supported for local provider.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -128,8 +128,8 @@ async def serve(
                 }
             ),
             Tool(
-                name="gitlab-get-docs",
-                description="Retrieve documentation for a specific GitLab library. Supports topic filtering and pagination.",
+                name="repo-ctx-docs",
+                description="Retrieve documentation for a specific indexed repository. Supports topic filtering and pagination. Works with any indexed repository (local, GitHub, GitLab).",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -149,39 +149,53 @@ async def serve(
                     },
                     "required": ["libraryId"]
                 }
+            ),
+            Tool(
+                name="repo-ctx-list",
+                description="List all indexed repositories with metadata (name, description, versions, last indexed date). Optionally filter by provider. Use this to see what's available in your index.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "provider": {
+                            "type": "string",
+                            "description": "Optional provider filter: 'local', 'github', 'gitlab', or omit for all",
+                            "enum": ["local", "github", "gitlab"]
+                        }
+                    }
+                }
             )
         ]
     
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-        if name == "gitlab-search-libraries":
+        if name == "repo-ctx-search":
             library_name = arguments["libraryName"]
             results = await context.search_libraries(library_name)
-            
+
             output = []
-            output.append("Available Libraries (search results):\n\n")
-            
+            output.append("Available Repositories (search results):\n\n")
+
             for result in results:
-                output.append(f"- Library ID: {result.library_id}\n")
+                output.append(f"- Repository ID: {result.library_id}\n")
                 output.append(f"  Name: {result.name}\n")
                 output.append(f"  Description: {result.description}\n")
                 output.append(f"  Versions: {', '.join(result.versions)}\n")
                 output.append("\n")
-            
+
             if not results:
-                output.append(f"No libraries found matching '{library_name}'.\n")
-                output.append("Make sure the repository has been indexed first.\n")
-            
+                output.append(f"No repositories found matching '{library_name}'.\n")
+                output.append("Make sure the repository has been indexed first using repo-ctx-index.\n")
+
             return [TextContent(type="text", text="".join(output))]
-        
-        elif name == "gitlab-fuzzy-search":
+
+        elif name == "repo-ctx-fuzzy-search":
             query = arguments["query"]
             limit = arguments.get("limit", 10)
             results = await context.fuzzy_search_libraries(query, limit)
-            
+
             output = []
             output.append(f"Fuzzy search results for '{query}':\n\n")
-            
+
             for i, result in enumerate(results, 1):
                 output.append(f"{i}. {result.library_id}\n")
                 output.append(f"   Name: {result.name}\n")
@@ -189,24 +203,32 @@ async def serve(
                 output.append(f"   Description: {result.description}\n")
                 output.append(f"   Match: {result.match_type} in {result.matched_field} (score: {result.score:.2f})\n")
                 output.append("\n")
-            
+
             if not results:
                 output.append(f"No repositories found matching '{query}'.\n")
-                output.append("Try a different search term or index repositories first using gitlab-index-repository or gitlab-index-group.\n")
+                output.append("Try a different search term or index repositories first using repo-ctx-index or repo-ctx-index-group.\n")
             else:
-                output.append(f"\nTo get documentation, use gitlab-get-docs with one of the Library IDs above.\n")
-            
+                output.append(f"\nTo get documentation, use repo-ctx-docs with one of the Repository IDs above.\n")
+
             return [TextContent(type="text", text="".join(output))]
-        
-        elif name == "gitlab-index-repository":
+
+        elif name == "repo-ctx-index":
             repository = arguments["repository"]
             provider = arguments.get("provider", "auto")
-            parts = repository.split("/")
-            if len(parts) < 2:
-                return [TextContent(type="text", text=f"Error: Repository must be in format group/project or owner/repo")]
 
-            project = parts[-1]
-            group = "/".join(parts[:-1])
+            # Handle local paths (don't split them)
+            from .providers.detector import ProviderDetector
+            detected_provider = ProviderDetector.detect(repository)
+
+            if detected_provider == "local" or provider == "local" or repository.startswith(("/", "./", "~/")):
+                group = repository
+                project = ""
+            else:
+                parts = repository.split("/")
+                if len(parts) < 2:
+                    return [TextContent(type="text", text=f"Error: Repository must be in format group/project, owner/repo, or /path/to/repo")]
+                project = parts[-1]
+                group = "/".join(parts[:-1])
 
             # Convert "auto" to None for auto-detection
             provider_type = None if provider == "auto" else provider
@@ -214,11 +236,11 @@ async def serve(
             try:
                 await context.index_repository(group, project, provider_type=provider_type)
                 provider_used = provider_type or "auto-detected"
-                return [TextContent(type="text", text=f"Successfully indexed {repository} using {provider_used} provider. You can now search for it using gitlab-fuzzy-search or gitlab-get-docs.")]
+                return [TextContent(type="text", text=f"Successfully indexed {repository} using {provider_used} provider. You can now search for it using repo-ctx-fuzzy-search or repo-ctx-docs.")]
             except Exception as e:
                 return [TextContent(type="text", text=f"Error indexing {repository}: {str(e)}")]
-        
-        elif name == "gitlab-index-group":
+
+        elif name == "repo-ctx-index-group":
             group = arguments["group"]
             include_subgroups = arguments.get("includeSubgroups", True)
             provider = arguments.get("provider", "auto")
@@ -250,18 +272,58 @@ async def serve(
                 return [TextContent(type="text", text="".join(output))]
             except Exception as e:
                 return [TextContent(type="text", text=f"Error indexing group {group}: {str(e)}")]
-        
-        elif name == "gitlab-get-docs":
+
+        elif name == "repo-ctx-docs":
             library_id = arguments["libraryId"]
             topic = arguments.get("topic")
             page = arguments.get("page", 1)
-            
+
             try:
                 result = await context.get_documentation(library_id, topic, page)
                 return [TextContent(type="text", text=result["content"][0]["text"])]
             except Exception as e:
                 return [TextContent(type="text", text=f"Error: {str(e)}")]
-        
+
+        elif name == "repo-ctx-list":
+            provider_filter = arguments.get("provider")
+
+            try:
+                libraries = await context.list_all_libraries(provider_filter)
+
+                output = []
+                if provider_filter:
+                    output.append(f"Indexed repositories ({provider_filter} provider):\n\n")
+                else:
+                    output.append(f"All indexed repositories ({len(libraries)} total):\n\n")
+
+                if not libraries:
+                    if provider_filter:
+                        output.append(f"No repositories found for provider '{provider_filter}'.\n")
+                    else:
+                        output.append("No repositories indexed yet.\n")
+                        output.append("Use repo-ctx-index to index repositories.\n")
+                    return [TextContent(type="text", text="".join(output))]
+
+                for i, lib in enumerate(libraries, 1):
+                    library_id = f"/{lib.group_name}/{lib.project_name}"
+                    output.append(f"{i}. {library_id}\n")
+
+                    # Show URL or file path
+                    url = context._get_repository_url(lib)
+                    output.append(f"   URL: {url}\n")
+
+                    if lib.description:
+                        output.append(f"   Description: {lib.description}\n")
+                    if lib.default_version:
+                        output.append(f"   Default version: {lib.default_version}\n")
+                    if lib.last_indexed:
+                        output.append(f"   Last indexed: {lib.last_indexed}\n")
+                    output.append("\n")
+
+                return [TextContent(type="text", text="".join(output))]
+            except Exception as e:
+                return [TextContent(type="text", text=f"Error listing repositories: {str(e)}")]
+
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
     
