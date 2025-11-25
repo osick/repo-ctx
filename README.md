@@ -1,7 +1,7 @@
 # Repository Context (`repo-ctx`)
 
 A flexible Git repository documentation indexer and search tool with multiple interfaces:
-- **MCP Server** for LLM integration (primary use case)
+- **MCP Server** for LLM integration (primary use case, details see [docs/mcp_tools_reference.md](docs/mcp_tools_reference.md))
 - **CLI** for standalone searching
 - **Python library** for custom integrations
 
