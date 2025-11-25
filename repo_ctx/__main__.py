@@ -142,6 +142,11 @@ Examples:
         type=int,
         help="Maximum tokens to return (recommended for LLM context management)"
     )
+    docs_parser.add_argument(
+        "--show-metadata",
+        action="store_true",
+        help="Show per-document metadata (quality scores, types, reading time)"
+    )
 
     args = parser.parse_args()
 
@@ -194,7 +199,8 @@ Examples:
             repository=args.repository,
             topic=args.topic,
             page=args.page,
-            max_tokens=args.max_tokens
+            max_tokens=args.max_tokens,
+            show_metadata=args.show_metadata
         ))
     else:
         # Server mode (default)
@@ -436,7 +442,8 @@ async def docs_command(
     repository: str = None,
     topic: str = None,
     page: int = 1,
-    max_tokens: int = None
+    max_tokens: int = None,
+    show_metadata: bool = False
 ):
     """Get documentation for a repository."""
     try:
@@ -495,6 +502,21 @@ async def docs_command(
 
         print("=" * 80)
         print()
+
+        # Show per-document metadata if requested
+        if show_metadata and 'documents_metadata' in metadata:
+            print("Document Metadata:")
+            print()
+            for doc_meta in metadata['documents_metadata']:
+                print(f"  📄 {doc_meta['file_path']}")
+                print(f"     Type: {doc_meta['document_type'].title()} | "
+                      f"Quality: {doc_meta['quality_score']}/100 | "
+                      f"Reading time: {doc_meta['reading_time']} min | "
+                      f"Code examples: {doc_meta['snippet_count']}")
+            print()
+            print("=" * 80)
+            print()
+
         print(content)
 
         # Pagination hint

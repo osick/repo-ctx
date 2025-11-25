@@ -149,6 +149,11 @@ async def serve(
                             "type": "integer",
                             "description": "Page number for pagination (default: 1). Ignored if maxTokens is specified.",
                             "default": 1
+                        },
+                        "includeMetadata": {
+                            "type": "boolean",
+                            "description": "Include quality scores, document types, and metadata in response (default: false)",
+                            "default": False
                         }
                     },
                     "required": ["libraryId"]
@@ -282,6 +287,7 @@ async def serve(
             topic = arguments.get("topic")
             page = arguments.get("page", 1)
             max_tokens = arguments.get("maxTokens")
+            include_metadata = arguments.get("includeMetadata", False)
 
             try:
                 result = await context.get_documentation(
@@ -290,7 +296,28 @@ async def serve(
                     page,
                     max_tokens=max_tokens
                 )
-                return [TextContent(type="text", text=result["content"][0]["text"])]
+
+                # Build response text
+                response_text = result["content"][0]["text"]
+
+                # Optionally append metadata
+                if include_metadata and "documents_metadata" in result.get("metadata", {}):
+                    metadata = result["metadata"]
+                    response_text += "\n\n---\n\n## Documentation Metadata\n\n"
+                    response_text += f"**Library:** {metadata['library']}\n"
+                    response_text += f"**Version:** {metadata['version']}\n"
+                    response_text += f"**Documents:** {metadata['documents_count']}\n"
+                    response_text += f"**Total tokens:** {metadata['tokens']}\n\n"
+
+                    response_text += "### Document Quality & Classification\n\n"
+                    for doc_meta in metadata["documents_metadata"]:
+                        response_text += f"- **{doc_meta['file_path']}**\n"
+                        response_text += f"  - Type: {doc_meta['document_type'].title()}\n"
+                        response_text += f"  - Quality Score: {doc_meta['quality_score']}/100\n"
+                        response_text += f"  - Reading Time: {doc_meta['reading_time']} min\n"
+                        response_text += f"  - Code Examples: {doc_meta['snippet_count']}\n"
+
+                return [TextContent(type="text", text=response_text)]
             except Exception as e:
                 return [TextContent(type="text", text=f"Error: {str(e)}")]
 

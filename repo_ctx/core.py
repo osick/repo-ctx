@@ -289,6 +289,7 @@ class RepositoryContext:
         if max_tokens:
             # Format documents one by one and accumulate until token limit
             formatted_docs = []
+            docs_metadata = []
             total_tokens = 0
 
             for doc in documents:
@@ -300,6 +301,11 @@ class RepositoryContext:
                 if total_tokens + doc_tokens <= max_tokens:
                     formatted_docs.append(doc)
                     total_tokens += doc_tokens
+
+                    # Extract metadata for this document
+                    doc_metadata = self.parser.extract_metadata(doc.content, doc.file_path)
+                    doc_metadata["file_path"] = doc.file_path
+                    docs_metadata.append(doc_metadata)
                 else:
                     break  # Stop when limit reached
 
@@ -313,19 +319,28 @@ class RepositoryContext:
                 "documents_count": len(formatted_docs),
                 "tokens": actual_tokens,
                 "max_tokens": max_tokens,
-                "documents_available": len(documents)
+                "documents_available": len(documents),
+                "documents_metadata": docs_metadata
             }
         else:
             # Page-based: format all retrieved documents
             content = self.parser.format_for_llm(documents, library_id)
             actual_tokens = self.parser.count_tokens(content)
 
+            # Extract metadata for all documents
+            docs_metadata = []
+            for doc in documents:
+                doc_metadata = self.parser.extract_metadata(doc.content, doc.file_path)
+                doc_metadata["file_path"] = doc.file_path
+                docs_metadata.append(doc_metadata)
+
             metadata = {
                 "library": f"{group}/{project}",
                 "version": version,
                 "documents_count": len(documents),
                 "tokens": actual_tokens,
-                "page": page
+                "page": page,
+                "documents_metadata": docs_metadata
             }
 
         return {

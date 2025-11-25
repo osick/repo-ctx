@@ -358,3 +358,242 @@ class TestParserInitialization:
         parser = Parser()
         assert parser.md is not None
         assert hasattr(parser.md, 'parse')  # MarkdownIt has parse method
+
+
+class TestParserQualityScoring:
+    """Test quality scoring for documentation files."""
+
+    def setup_method(self):
+        """Set up parser instance for each test."""
+        self.parser = Parser()
+
+    def test_calculate_quality_score_readme_high_quality(self):
+        """Test that README files with good content get high scores."""
+        content = """# Project Name
+
+This is a comprehensive README that explains the project. It provides clear documentation with examples.
+
+## Installation
+
+```bash
+npm install project-name
+```
+
+## Usage
+
+Here's how to use it:
+
+```python
+import project
+project.run()
+```
+"""
+        score = self.parser.calculate_quality_score(content, "README.md")
+        assert score >= 75  # High quality README should score well
+
+    def test_calculate_quality_score_docs_folder_bonus(self):
+        """Test that files in docs/ folder get location bonus."""
+        content = """# API Reference
+
+Complete API documentation with examples and explanations for developers.
+
+## Methods
+
+- `method1()` - Does something important
+- `method2()` - Does something else
+
+```javascript
+api.method1();
+```
+"""
+        score = self.parser.calculate_quality_score(content, "docs/api.md")
+        assert score >= 70  # docs/ folder gets bonus
+
+    def test_calculate_quality_score_too_short_penalty(self):
+        """Test that very short files get penalized."""
+        content = "# Title\n\nVery brief."
+        score = self.parser.calculate_quality_score(content, "brief.md")
+        assert score <= 50  # Too short, should have low score
+
+    def test_calculate_quality_score_no_code_examples(self):
+        """Test that files without code examples score lower."""
+        content = """# Documentation
+
+This is a long piece of documentation that explains concepts in detail.
+It provides thorough explanations and covers many topics comprehensively.
+However, it lacks practical code examples that developers can use.
+"""
+        score = self.parser.calculate_quality_score(content, "guide.md")
+        # Should still be decent but not top tier without code
+        assert 40 <= score <= 70
+
+    def test_calculate_quality_score_too_long_penalty(self):
+        """Test that extremely long files get slight penalty."""
+        # Simulate very long content
+        content = "# Title\n\n" + ("This is a paragraph. " * 1000)
+        score = self.parser.calculate_quality_score(content, "verbose.md")
+        # Long but should still be reasonable if has structure
+        assert score >= 30
+
+
+class TestParserDocumentClassification:
+    """Test document type classification."""
+
+    def setup_method(self):
+        """Set up parser instance for each test."""
+        self.parser = Parser()
+
+    def test_classify_document_tutorial(self):
+        """Test classification of tutorial-style documents."""
+        content = """# Getting Started Tutorial
+
+This tutorial shows you how to get started step by step.
+
+## Step 1: Installation
+
+First, install the package:
+
+```bash
+npm install package
+```
+
+## Step 2: Configuration
+
+Next, configure your project...
+"""
+        doc_type = self.parser.classify_document(content, "getting-started.md")
+        assert doc_type == "tutorial"
+
+    def test_classify_document_reference(self):
+        """Test classification of API reference documents."""
+        content = """# API Reference
+
+## Function: processData
+
+**Parameters:**
+- `data` (array): The data to process
+- `options` (object): Configuration options
+
+**Returns:** Processed data array
+
+**Example:**
+
+```javascript
+processData([1, 2, 3], {mode: 'fast'})
+```
+"""
+        doc_type = self.parser.classify_document(content, "api-reference.md")
+        assert doc_type == "reference"
+
+    def test_classify_document_guide(self):
+        """Test classification of conceptual guides."""
+        content = """# Understanding Architecture
+
+This guide explains the architecture and design concepts behind the system.
+
+## Overview
+
+The system uses a modular architecture that separates concerns effectively.
+Understanding these concepts will help you work with the codebase more effectively.
+
+## Key Concepts
+
+- Modularity: Each component handles specific functionality
+- Loose coupling: Components interact through well-defined interfaces
+"""
+        doc_type = self.parser.classify_document(content, "architecture-guide.md")
+        assert doc_type == "guide"
+
+    def test_classify_document_overview_readme(self):
+        """Test classification of README/overview documents."""
+        content = """# MyProject
+
+MyProject is a tool for doing amazing things. This repository contains the source code.
+
+## Features
+
+- Feature 1
+- Feature 2
+- Feature 3
+
+## Quick Start
+
+See the documentation for details.
+"""
+        doc_type = self.parser.classify_document(content, "README.md")
+        assert doc_type == "overview"
+
+    def test_classify_document_index_as_overview(self):
+        """Test that index files are classified as overview."""
+        content = """# Documentation Index
+
+Welcome to the documentation. Choose a section below.
+
+- Getting Started
+- API Reference
+- Guides
+"""
+        doc_type = self.parser.classify_document(content, "docs/index.md")
+        assert doc_type == "overview"
+
+
+class TestParserMetadataExtraction:
+    """Test metadata extraction from documents."""
+
+    def setup_method(self):
+        """Set up parser instance for each test."""
+        self.parser = Parser()
+
+    def test_extract_metadata_complete(self):
+        """Test extracting complete metadata from a well-structured document."""
+        content = """# API Documentation
+
+This is a comprehensive API reference with examples. It provides detailed documentation
+for all available methods and includes practical code examples for developers.
+
+## Authentication
+
+```python
+import api
+api.authenticate(token='your-token')
+```
+
+## Making Requests
+
+```python
+response = api.get('/endpoint')
+```
+"""
+        metadata = self.parser.extract_metadata(content, "docs/api.md")
+
+        assert "quality_score" in metadata
+        assert "document_type" in metadata
+        assert "reading_time" in metadata
+        assert "snippet_count" in metadata
+        assert "has_code_examples" in metadata
+
+        assert metadata["quality_score"] >= 60  # Good quality doc
+        assert metadata["document_type"] in ["tutorial", "reference", "guide", "overview"]
+        assert metadata["snippet_count"] == 2  # Two code blocks
+        assert metadata["has_code_examples"] is True
+
+    def test_extract_metadata_reading_time(self):
+        """Test reading time calculation (roughly 200 words per minute)."""
+        # ~400 words should be ~2 minutes
+        content = "# Title\n\n" + (" ".join(["word"] * 400))
+        metadata = self.parser.extract_metadata(content, "test.md")
+
+        assert "reading_time" in metadata
+        assert 1 <= metadata["reading_time"] <= 3  # ~2 minutes +/- 1
+
+    def test_extract_metadata_no_code(self):
+        """Test metadata for document without code examples."""
+        content = """# Guide
+
+This is a purely conceptual guide without any code examples.
+It explains ideas and concepts in plain language.
+"""
+        metadata = self.parser.extract_metadata(content, "guide.md")
+
+        assert metadata["snippet_count"] == 0
+        assert metadata["has_code_examples"] is False
