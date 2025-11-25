@@ -282,8 +282,9 @@ class RepositoryContext:
             # Get all documents for token-based limiting
             documents = await self.storage.get_documents(version_id, topic, page=1, page_size=9999)
         else:
-            # Get paginated documents
-            documents = await self.storage.get_documents(version_id, topic, page)
+            # Get all documents for page-based (page_size=9999 means get all)
+            # Users can still use --page for manual pagination if needed
+            documents = await self.storage.get_documents(version_id, topic, page, page_size=9999)
 
         # Token-based limiting: format incrementally if max_tokens specified
         if max_tokens:
