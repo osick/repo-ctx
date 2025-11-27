@@ -68,7 +68,21 @@ class Storage:
             """)
             await db.execute("CREATE INDEX IF NOT EXISTS idx_libraries_search ON libraries(group_name, project_name)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_documents_version ON documents(version_id)")
+
+            # Run code analysis migration
+            await self._run_code_analysis_migration(db)
+
             await db.commit()
+
+    async def _run_code_analysis_migration(self, db):
+        """Run code analysis schema migration."""
+        from pathlib import Path
+        migration_path = Path(__file__).parent / "migrations" / "002_code_analysis.sql"
+
+        if migration_path.exists():
+            migration_sql = migration_path.read_text()
+            # Execute migration (split by semicolon for multiple statements)
+            await db.executescript(migration_sql)
     
     async def save_library(self, library: Library) -> int:
         """Save or update library."""
@@ -299,3 +313,206 @@ class Storage:
         # Sort by score descending
         results.sort(key=lambda x: x.score, reverse=True)
         return results[:limit]
+
+    # Code Analysis Storage Methods
+
+    async def save_symbol(self, symbol, repository_id: int) -> int:
+        """
+        Save a symbol to the database.
+
+        Args:
+            symbol: Symbol object to save
+            repository_id: Repository ID
+
+        Returns:
+            Symbol ID
+        """
+        import json
+
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """INSERT INTO symbols (
+                    repository_id, file_path, symbol_type, name, qualified_name,
+                    line_start, line_end, column_start, signature, visibility,
+                    language, documentation, is_exported, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    repository_id,
+                    symbol.file_path,
+                    symbol.symbol_type.value,
+                    symbol.name,
+                    symbol.qualified_name,
+                    symbol.line_start,
+                    symbol.line_end,
+                    symbol.column_start,
+                    symbol.signature,
+                    symbol.visibility,
+                    symbol.language,
+                    symbol.documentation,
+                    symbol.is_exported,
+                    json.dumps(symbol.metadata)
+                )
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def save_symbols(self, symbols: list, repository_id: int) -> list[int]:
+        """
+        Save multiple symbols to the database.
+
+        Args:
+            symbols: List of Symbol objects
+            repository_id: Repository ID
+
+        Returns:
+            List of symbol IDs
+        """
+        ids = []
+        for symbol in symbols:
+            symbol_id = await self.save_symbol(symbol, repository_id)
+            ids.append(symbol_id)
+        return ids
+
+    async def get_symbol_by_id(self, symbol_id: int) -> Optional[dict]:
+        """Get a symbol by ID."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM symbols WHERE id = ?",
+                (symbol_id,)
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return dict(row)
+
+    async def get_symbols_by_file(self, repository_id: int, file_path: str) -> list[dict]:
+        """Get all symbols for a specific file."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM symbols WHERE repository_id = ? AND file_path = ? ORDER BY line_start",
+                (repository_id, file_path)
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_symbols_by_type(self, repository_id: int, symbol_type: str) -> list[dict]:
+        """Get all symbols of a specific type."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM symbols WHERE repository_id = ? AND symbol_type = ? ORDER BY file_path, line_start",
+                (repository_id, symbol_type)
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def search_symbols(self, repository_id: int, query: str) -> list[dict]:
+        """Full-text search symbols."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT s.* FROM symbols s
+                   JOIN symbols_fts fts ON s.id = fts.rowid
+                   WHERE fts.symbols_fts MATCH ? AND s.repository_id = ?
+                   ORDER BY rank""",
+                (query, repository_id)
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def save_dependency(
+        self,
+        source_symbol_id: int,
+        target_symbol_id: int,
+        dependency_type: str,
+        line: Optional[int] = None
+    ) -> int:
+        """Save a dependency between symbols."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """INSERT INTO dependencies (
+                    source_symbol_id, target_symbol_id, dependency_type, location_line
+                ) VALUES (?, ?, ?, ?)""",
+                (source_symbol_id, target_symbol_id, dependency_type, line)
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_dependencies_for_symbol(self, symbol_id: int) -> list[dict]:
+        """Get all dependencies where this symbol is the source."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM dependencies WHERE source_symbol_id = ?",
+                (symbol_id,)
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_dependents_for_symbol(self, symbol_id: int) -> list[dict]:
+        """Get all dependencies where this symbol is the target."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM dependencies WHERE target_symbol_id = ?",
+                (symbol_id,)
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def save_call_edge(
+        self,
+        caller_id: int,
+        callee_id: int,
+        call_locations: list[dict]
+    ):
+        """Save a call graph edge."""
+        import json
+
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """INSERT INTO call_graph (caller_id, callee_id, call_count, call_locations)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(caller_id, callee_id) DO UPDATE SET
+                   call_count = call_count + 1,
+                   call_locations = ?""",
+                (caller_id, callee_id, len(call_locations), json.dumps(call_locations), json.dumps(call_locations))
+            )
+            await db.commit()
+
+    async def get_call_graph(self, repository_id: int) -> list[dict]:
+        """Get the full call graph for a repository."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT cg.* FROM call_graph cg
+                   JOIN symbols s ON cg.caller_id = s.id
+                   WHERE s.repository_id = ?""",
+                (repository_id,)
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_forward_calls(self, symbol_id: int) -> list[dict]:
+        """Get all functions called by this symbol."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM call_graph WHERE caller_id = ?",
+                (symbol_id,)
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_backward_calls(self, symbol_id: int) -> list[dict]:
+        """Get all functions that call this symbol."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM call_graph WHERE callee_id = ?",
+                (symbol_id,)
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]

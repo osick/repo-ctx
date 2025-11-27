@@ -6,7 +6,9 @@ Complete reference for all MCP tools provided by the repo-ctx server.
 
 ## Overview
 
-repo-ctx provides **6 MCP tools** for repository documentation indexing and retrieval:
+repo-ctx provides **10 MCP tools** for repository documentation indexing, retrieval, and code analysis:
+
+### Repository Management & Documentation (6 tools)
 
 1. **repo-ctx-search** - Search for indexed repositories
 2. **repo-ctx-fuzzy-search** - Fuzzy/typo-tolerant search
@@ -15,7 +17,16 @@ repo-ctx provides **6 MCP tools** for repository documentation indexing and retr
 5. **repo-ctx-list** - List all indexed repositories
 6. **repo-ctx-docs** - Retrieve documentation content
 
+### Code Analysis (4 tools)
+
+7. **repo-ctx-analyze** - Analyze code structure and extract symbols
+8. **repo-ctx-search-symbol** - Search for symbols by name or pattern
+9. **repo-ctx-get-symbol-detail** - Get detailed symbol information
+10. **repo-ctx-get-file-symbols** - List all symbols in a specific file
+
 **Note:** All tools support **GitLab, GitHub, and local Git repositories** with auto-detection or explicit provider selection.
+
+**Supported languages for code analysis:** Python, JavaScript, TypeScript, Java, Kotlin
 
 ---
 
@@ -697,6 +708,190 @@ await use_mcp_tool("repo-ctx", "repo-ctx-index", {
 
 ---
 
+## 7. repo-ctx-analyze
+
+**Purpose:** Analyze source code to extract symbols (functions, classes, methods, interfaces, enums).
+
+**When to use:** When you need to understand the code structure without indexing, or analyze remote repositories directly.
+
+### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `path` | string | ✅ Yes | - | Local path or remote repository (e.g., `owner/repo` for GitHub) |
+| `language` | string | ❌ No | All | Filter by language: `python`, `javascript`, `typescript`, `java` |
+| `symbolType` | string | ❌ No | All | Filter by type: `function`, `class`, `method`, `interface`, `enum` |
+| `includePrivate` | boolean | ❌ No | true | Include private/protected symbols |
+| `outputFormat` | string | ❌ No | text | Output format: `text` (human-readable with emojis), `json` (structured), `yaml` (structured) |
+
+### Returns
+
+List of extracted symbols with:
+- Symbol name and qualified name
+- Symbol type (function, class, method, etc.)
+- File path and line number
+- Visibility (public, private, protected)
+- Documentation/comments
+- Signature (for functions/methods)
+- Metadata (parameters, return type, modifiers, etc.)
+
+### Example Usage
+
+```javascript
+// Analyze local directory (human-readable text output)
+const analysis = await use_mcp_tool("repo-ctx", "repo-ctx-analyze", {
+  path: "./src",
+  language: "python",
+  symbolType: "class"
+});
+
+// Analyze with structured JSON output
+const jsonAnalysis = await use_mcp_tool("repo-ctx", "repo-ctx-analyze", {
+  path: "./src",
+  language: "java",
+  outputFormat: "json"
+});
+
+// Analyze remote GitHub repository with YAML output
+const remoteAnalysis = await use_mcp_tool("repo-ctx", "repo-ctx-analyze", {
+  path: "owner/repo",
+  language: "java",
+  symbolType: "method",
+  outputFormat: "yaml"
+});
+```
+
+### Example Output
+
+```
+📊 Code Analysis Results
+
+Files analyzed: 15
+Total symbols: 47
+
+Symbols by type:
+  class: 12
+  method: 35
+
+📄 src/services/UserService.java
+  📦 🔓 UserService (class)
+     Line 15 | public class UserService
+     📖 Service for managing user accounts and authentication
+
+  ⚡ 🔓 createUser (method)
+     Line 23 | public User createUser(String name, String email)
+     📖 Creates a new user account
+```
+
+---
+
+## 8. repo-ctx-search-symbol
+
+**Purpose:** Search for symbols by name or pattern across source files.
+
+**When to use:** When you need to find specific functions, classes, or methods by name.
+
+### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `path` | string | ✅ Yes | - | Local path or remote repository to search |
+| `query` | string | ✅ Yes | - | Symbol name or pattern to search for |
+| `symbolType` | string | ❌ No | All | Filter by type: `function`, `class`, `method`, `interface`, `enum` |
+| `language` | string | ❌ No | All | Filter by language: `python`, `javascript`, `typescript`, `java` |
+| `outputFormat` | string | ❌ No | text | Output format: `text`, `json`, `yaml` |
+
+### Returns
+
+List of matching symbols with:
+- Symbol name and location
+- Symbol type
+- File path and line number
+- Brief preview
+
+### Example Usage
+
+```javascript
+// Search for symbols containing "user"
+const symbols = await use_mcp_tool("repo-ctx", "repo-ctx-search-symbol", {
+  path: "./src",
+  query: "user",
+  symbolType: "class"
+});
+```
+
+---
+
+## 9. repo-ctx-get-symbol-detail
+
+**Purpose:** Get detailed information about a specific symbol.
+
+**When to use:** When you need comprehensive details about a specific function, class, or method.
+
+### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `path` | string | ✅ Yes | - | Local path or remote repository |
+| `symbolName` | string | ✅ Yes | - | Exact symbol name or qualified name |
+| `outputFormat` | string | ❌ No | text | Output format: `text`, `json`, `yaml` |
+
+### Returns
+
+Detailed symbol information including:
+- Full signature
+- Documentation
+- Parameters and return types
+- Dependencies
+- Call relationships (if available)
+- Metadata (modifiers, visibility, etc.)
+
+### Example Usage
+
+```javascript
+// Get details for a specific symbol
+const details = await use_mcp_tool("repo-ctx", "repo-ctx-get-symbol-detail", {
+  path: "./src",
+  symbolName: "UserService.createUser"
+});
+```
+
+---
+
+## 10. repo-ctx-get-file-symbols
+
+**Purpose:** List all symbols in a specific file.
+
+**When to use:** When you need to understand the structure of a single source file.
+
+### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `filePath` | string | ✅ Yes | - | Path to the source file |
+| `groupByType` | boolean | ❌ No | false | Group symbols by type (class, function, etc.) |
+| `outputFormat` | string | ❌ No | text | Output format: `text`, `json`, `yaml` |
+
+### Returns
+
+List of all symbols in the file, optionally grouped by type:
+- Symbol name and type
+- Line numbers
+- Signatures
+- Documentation
+
+### Example Usage
+
+```javascript
+// Get all symbols in a file
+const fileSymbols = await use_mcp_tool("repo-ctx", "repo-ctx-get-file-symbols", {
+  filePath: "./src/services/UserService.java",
+  groupByType: true
+});
+```
+
+---
+
 ## Rate Limits
 
 ### GitHub
@@ -759,6 +954,8 @@ All tools use the `repo-ctx-` prefix to indicate they are part of the repo-ctx p
 
 ## Quick Reference
 
+### Repository Management & Documentation
+
 | Tool | Purpose | Key Parameters | Provider Support |
 |------|---------|----------------|------------------|
 | `repo-ctx-search` | Exact name search | `libraryName` | All (searches all indexed repos) |
@@ -767,6 +964,15 @@ All tools use the `repo-ctx-` prefix to indicate they are part of the repo-ctx p
 | `repo-ctx-index-group` | Index group/org | `group`, `includeSubgroups`, `provider` | GitLab, GitHub (not Local) |
 | `repo-ctx-list` | List indexed repos | `provider` (optional) | All (shows all indexed repos, filterable) |
 | `repo-ctx-docs` | Get documentation | `libraryId`, `topic`, `page` | All (retrieves any indexed repo) |
+
+### Code Analysis
+
+| Tool | Purpose | Key Parameters | Language Support |
+|------|---------|----------------|------------------|
+| `repo-ctx-analyze` | Extract symbols from code | `path`, `language`, `symbolType`, `outputFormat` | Python, JS, TS, Java, Kotlin |
+| `repo-ctx-search-symbol` | Search for symbols | `path`, `query`, `symbolType`, `outputFormat` | Python, JS, TS, Java, Kotlin |
+| `repo-ctx-get-symbol-detail` | Get symbol details | `path`, `symbolName`, `outputFormat` | Python, JS, TS, Java, Kotlin |
+| `repo-ctx-get-file-symbols` | List file symbols | `filePath`, `groupByType`, `outputFormat` | Python, JS, TS, Java, Kotlin |
 
 **Provider Configuration:**
 - **Local:** No configuration required ✅

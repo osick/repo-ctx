@@ -148,6 +148,114 @@ Examples:
         help="Show per-document metadata (quality scores, types, reading time)"
     )
 
+    # Analyze command
+    analyze_parser = subparsers.add_parser(
+        "analyze",
+        help="Analyze code structure and extract symbols"
+    )
+    analyze_parser.add_argument(
+        "path",
+        help="Path to local directory/file or remote repository (e.g., owner/repo for GitHub)"
+    )
+    analyze_parser.add_argument(
+        "--output",
+        choices=["text", "json", "yaml"],
+        default="text",
+        help="Output format: text (human-readable), json (structured), yaml (structured)"
+    )
+    analyze_parser.add_argument(
+        "--show-dependencies",
+        action="store_true",
+        help="Show dependency graph"
+    )
+    analyze_parser.add_argument(
+        "--show-callgraph",
+        action="store_true",
+        help="Show call graph"
+    )
+    analyze_parser.add_argument(
+        "--filter-type",
+        choices=["function", "class", "method", "interface", "enum"],
+        help="Filter by symbol type"
+    )
+    analyze_parser.add_argument(
+        "--language",
+        choices=["python", "javascript", "typescript", "java", "kotlin"],
+        help="Filter by programming language"
+    )
+
+    # Search-symbol command
+    search_symbol_parser = subparsers.add_parser(
+        "search-symbol",
+        help="Search for symbols by name pattern"
+    )
+    search_symbol_parser.add_argument(
+        "path",
+        help="Path to local directory/file to search"
+    )
+    search_symbol_parser.add_argument(
+        "query",
+        help="Symbol name or pattern to search for"
+    )
+    search_symbol_parser.add_argument(
+        "--output",
+        choices=["text", "json", "yaml"],
+        default="text",
+        help="Output format"
+    )
+    search_symbol_parser.add_argument(
+        "--filter-type",
+        choices=["function", "class", "method", "interface", "enum"],
+        help="Filter by symbol type"
+    )
+    search_symbol_parser.add_argument(
+        "--language",
+        choices=["python", "javascript", "typescript", "java", "kotlin"],
+        help="Filter by programming language"
+    )
+
+    # Symbol-detail command
+    symbol_detail_parser = subparsers.add_parser(
+        "symbol-detail",
+        help="Get detailed information about a specific symbol"
+    )
+    symbol_detail_parser.add_argument(
+        "path",
+        help="Path to local directory/file"
+    )
+    symbol_detail_parser.add_argument(
+        "symbol_name",
+        help="Exact symbol name or qualified name (e.g., 'MyClass.method')"
+    )
+    symbol_detail_parser.add_argument(
+        "--output",
+        choices=["text", "json", "yaml"],
+        default="text",
+        help="Output format"
+    )
+
+    # File-symbols command
+    file_symbols_parser = subparsers.add_parser(
+        "file-symbols",
+        help="List all symbols in a specific file"
+    )
+    file_symbols_parser.add_argument(
+        "file_path",
+        help="Path to the source file"
+    )
+    file_symbols_parser.add_argument(
+        "--output",
+        choices=["text", "json", "yaml"],
+        default="text",
+        help="Output format"
+    )
+    file_symbols_parser.add_argument(
+        "--group-by-type",
+        action="store_true",
+        default=True,
+        help="Group symbols by type (default: true)"
+    )
+
     args = parser.parse_args()
 
     # Handle legacy --index argument
@@ -201,6 +309,48 @@ Examples:
             page=args.page,
             max_tokens=args.max_tokens,
             show_metadata=args.show_metadata
+        ))
+    elif args.command == "analyze":
+        # Load config for potential remote repository access
+        from .config import Config
+        config = Config.load(
+            config_path=args.config,
+            gitlab_url=args.gitlab_url,
+            gitlab_token=args.gitlab_token,
+            github_url=args.github_url,
+            github_token=args.github_token,
+            storage_path=args.storage_path
+        )
+
+        asyncio.run(analyze_command(
+            path=args.path,
+            output=args.output,
+            show_dependencies=args.show_dependencies,
+            show_callgraph=args.show_callgraph,
+            filter_type=args.filter_type,
+            language=args.language,
+            provider_type=args.provider if args.provider != "auto" else None,
+            config=config
+        ))
+    elif args.command == "search-symbol":
+        asyncio.run(search_symbol_command(
+            path=args.path,
+            query=args.query,
+            output=args.output,
+            filter_type=args.filter_type,
+            language=args.language
+        ))
+    elif args.command == "symbol-detail":
+        asyncio.run(symbol_detail_command(
+            path=args.path,
+            symbol_name=args.symbol_name,
+            output=args.output
+        ))
+    elif args.command == "file-symbols":
+        asyncio.run(file_symbols_command(
+            file_path=args.file_path,
+            output=args.output,
+            group_by_type=args.group_by_type
         ))
     else:
         # Server mode (default)
@@ -612,6 +762,613 @@ def _clean_description(description: str) -> str:
     text = text.strip()
 
     return text
+
+
+async def analyze_command(
+    path: str,
+    output: str = "text",
+    show_dependencies: bool = False,
+    show_callgraph: bool = False,
+    filter_type: str = None,
+    language: str = None,
+    provider_type: str = None,
+    config: 'Config' = None
+):
+    """Analyze code structure and extract symbols."""
+    import os
+    import json
+    from pathlib import Path
+    from .analysis import CodeAnalyzer, SymbolType
+
+    analyzer = CodeAnalyzer()
+    path_obj = Path(path)
+
+    # Collect files to analyze
+    files = {}
+
+    # Check if this is a local path or a repository identifier
+    is_local_path = path_obj.exists() or path.startswith(('/', './', '~/', '../'))
+
+    if is_local_path:
+        # Local file/directory analysis
+        if path_obj.is_file():
+            # Single file
+            if analyzer.detect_language(str(path_obj)):
+                with open(path_obj, 'r') as f:
+                    files[str(path_obj)] = f.read()
+        elif path_obj.is_dir():
+            # Directory - recursively collect source files
+            for root, _, filenames in os.walk(path_obj):
+                for filename in filenames:
+                    file_path = os.path.join(root, filename)
+                    if analyzer.detect_language(filename):
+                        try:
+                            with open(file_path, 'r', encoding='utf-8') as f:
+                                files[file_path] = f.read()
+                        except (UnicodeDecodeError, PermissionError):
+                            continue
+        else:
+            print(f"Error: Path '{path}' does not exist")
+            return
+    else:
+        # Repository identifier (e.g., owner/repo or group/project)
+        # Try to fetch from provider
+        print(f"Fetching repository '{path}' from remote...")
+        from .providers.detector import ProviderDetector
+        from .providers import ProviderFactory
+
+        # Detect provider if not specified
+        if not provider_type:
+            provider_type = ProviderDetector.detect(path)
+
+        # Parse repository path
+        if provider_type == "local":
+            print(f"Error: Path '{path}' does not exist locally")
+            return
+
+        parts = path.split("/")
+        if len(parts) < 2:
+            print(f"Error: Invalid repository path '{path}'. Expected format: owner/repo or group/project")
+            return
+
+        # Load config for provider if not provided
+        if not config:
+            from .config import Config
+            try:
+                config = Config.load(provider_type=provider_type)
+            except Exception as e:
+                print(f"Error: Could not load configuration for {provider_type}: {e}")
+                print(f"\nTo analyze a remote repository, you need to either:")
+                print(f"1. Clone it locally first: git clone <url> && repo-ctx analyze <local-path>")
+                print(f"2. Configure {provider_type} credentials (see documentation)")
+                return
+
+        # Get provider
+        try:
+            provider = ProviderFactory.from_config(config, provider_type)
+
+            # Fetch repository project info
+            project_info = await provider.get_project(path)
+
+            # Get default branch
+            ref = await provider.get_default_branch(project_info)
+
+            # Fetch file tree
+            file_paths = await provider.get_file_tree(project_info, ref)
+
+            # Fetch source files
+            for file_path in file_paths:
+                if analyzer.detect_language(file_path):
+                    try:
+                        file_content = await provider.read_file(project_info, file_path, ref)
+                        files[file_path] = file_content.content
+                    except Exception as e:
+                        if output != "json":
+                            print(f"Warning: Could not read {file_path}: {e}")
+                        continue
+
+            if output != "json" and files:
+                print(f"Fetched {len(files)} source file(s) from {path}")
+
+        except Exception as e:
+            print(f"Error fetching repository: {e}")
+            print(f"\nTip: For local analysis, clone first: git clone <url> && repo-ctx analyze <path>")
+            return
+
+    if not files:
+        print(f"No supported source files found in '{path}'")
+        print(f"Supported languages: {', '.join(analyzer.get_supported_languages())}")
+        return
+
+    # Analyze all files
+    if output == "text":
+        print(f"Analyzing {len(files)} file(s)...")
+    results = analyzer.analyze_files(files)
+
+    # Aggregate all symbols
+    all_symbols = analyzer.aggregate_symbols(results)
+
+    # Apply filters
+    if filter_type:
+        all_symbols = analyzer.filter_symbols_by_type(all_symbols, SymbolType(filter_type))
+
+    if language:
+        all_symbols = [s for s in all_symbols if s.language == language]
+
+    # Get statistics
+    stats = analyzer.get_statistics(all_symbols)
+
+    # Output results
+    if output in ["json", "yaml"]:
+        # Structured output (JSON or YAML)
+        output_data = {
+            "path": str(path),
+            "files_analyzed": len(files),
+            "statistics": stats,
+            "symbols": [
+                {
+                    "name": s.name,
+                    "type": s.symbol_type.value,
+                    "file": s.file_path,
+                    "line": s.line_start,
+                    "signature": s.signature,
+                    "visibility": s.visibility,
+                    "language": s.language,
+                    "qualified_name": s.qualified_name,
+                    "documentation": s.documentation
+                }
+                for s in all_symbols
+            ]
+        }
+        if output == "json":
+            print(json.dumps(output_data, indent=2))
+        else:  # yaml
+            import yaml
+            print(yaml.dump(output_data, default_flow_style=False, sort_keys=False))
+    else:
+        # Text output
+        print(f"\n{'='*80}")
+        print(f"Code Analysis Results: {path}")
+        print(f"{'='*80}\n")
+
+        print(f"Files analyzed: {len(files)}")
+        print(f"Total symbols: {stats['total_symbols']}\n")
+
+        print("Symbols by type:")
+        for sym_type, count in stats['by_type'].items():
+            print(f"  {sym_type:15} {count:5}")
+
+        if stats['by_language']:
+            print("\nSymbols by language:")
+            for lang, count in stats['by_language'].items():
+                print(f"  {lang:15} {count:5}")
+
+        print(f"\n{'='*80}")
+        print("Symbol Details:")
+        print(f"{'='*80}\n")
+
+        # Group symbols by file
+        by_file = {}
+        for symbol in all_symbols:
+            if symbol.file_path not in by_file:
+                by_file[symbol.file_path] = []
+            by_file[symbol.file_path].append(symbol)
+
+        for file_path, symbols in sorted(by_file.items()):
+            print(f"\n📄 {file_path}")
+            for symbol in sorted(symbols, key=lambda s: s.line_start):
+                vis_icon = "🔒" if symbol.visibility == "private" else "🔓"
+                type_icon = {
+                    "function": "⚡",
+                    "method": "🔧",
+                    "class": "📦",
+                    "interface": "📋",
+                    "enum": "🔢"
+                }.get(symbol.symbol_type.value, "•")
+
+                print(f"  {type_icon} {vis_icon} {symbol.name} ({symbol.symbol_type.value})")
+                print(f"     Line {symbol.line_start} | {symbol.signature or 'N/A'}")
+                if symbol.documentation:
+                    doc_preview = symbol.documentation[:60] + "..." if len(symbol.documentation) > 60 else symbol.documentation
+                    print(f"     📖 {doc_preview}")
+
+        if show_dependencies:
+            print(f"\n{'='*80}")
+            print("Dependencies (Imports):")
+            print(f"{'='*80}\n")
+
+            # Extract dependencies for all files
+            all_deps = []
+            for file_path, code in files.items():
+                file_deps = analyzer.extract_dependencies(code, file_path)
+                all_deps.extend(file_deps)
+
+            if all_deps:
+                # Group by source file
+                by_source = {}
+                for dep in all_deps:
+                    src = dep.get('source', 'unknown')
+                    if src not in by_source:
+                        by_source[src] = []
+                    by_source[src].append(dep)
+
+                for source_file, deps in sorted(by_source.items()):
+                    print(f"📄 {source_file}")
+                    for dep in sorted(deps, key=lambda d: d.get('line', 0)):
+                        target = dep.get('target', 'unknown')
+                        line = dep.get('line', '')
+                        is_external = dep.get('is_external', True)
+                        icon = "📦" if is_external else "📂"
+                        print(f"   {icon} → {target}", end="")
+                        if line:
+                            print(f" (line {line})", end="")
+                        print()
+                    print()
+            else:
+                print("No dependencies found.")
+
+        if show_callgraph:
+            print(f"\n{'='*80}")
+            print("Call Graph:")
+            print(f"{'='*80}\n")
+            print("Note: Call graph extraction requires deeper static analysis.")
+            print("Currently showing function/method call patterns from symbols.\n")
+
+            # Basic call pattern display based on method relationships
+            methods = [s for s in all_symbols if s.symbol_type.value in ('method', 'function')]
+            classes = [s for s in all_symbols if s.symbol_type.value == 'class']
+
+            if classes:
+                for cls in classes:
+                    class_methods = [s for s in methods
+                                    if s.qualified_name and s.qualified_name.startswith(cls.name + ".")]
+                    if class_methods:
+                        print(f"📦 {cls.name}")
+                        for method in sorted(class_methods, key=lambda s: s.line_start or 0):
+                            visibility = "🔒" if method.visibility == "private" else "🔓"
+                            print(f"   {visibility} {method.name}")
+                        print()
+
+            standalone_funcs = [s for s in methods
+                               if not s.qualified_name or "." not in s.qualified_name]
+            if standalone_funcs:
+                print("⚡ Standalone Functions")
+                for func in sorted(standalone_funcs, key=lambda s: s.line_start or 0):
+                    print(f"   {func.name}")
+
+
+async def search_symbol_command(
+    path: str,
+    query: str,
+    output: str = "text",
+    filter_type: str = None,
+    language: str = None
+):
+    """Search for symbols by name pattern."""
+    import os
+    import json
+    from pathlib import Path
+    from .analysis import CodeAnalyzer, SymbolType
+
+    analyzer = CodeAnalyzer()
+    path_obj = Path(path)
+
+    if not path_obj.exists():
+        print(f"Error: Path '{path}' does not exist")
+        return
+
+    # Collect files
+    files = {}
+    if path_obj.is_file():
+        if analyzer.detect_language(str(path_obj)):
+            with open(path_obj, 'r', encoding='utf-8') as f:
+                files[str(path_obj)] = f.read()
+    elif path_obj.is_dir():
+        for root, _, filenames in os.walk(path_obj):
+            for filename in filenames:
+                file_path = os.path.join(root, filename)
+                if analyzer.detect_language(filename):
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            files[file_path] = f.read()
+                    except (UnicodeDecodeError, PermissionError):
+                        continue
+
+    if not files:
+        print(f"No supported source files found in '{path}'")
+        return
+
+    # Analyze and search
+    results = analyzer.analyze_files(files)
+    all_symbols = analyzer.aggregate_symbols(results)
+
+    # Search by name (case-insensitive substring match)
+    query_lower = query.lower()
+    matching = [s for s in all_symbols if query_lower in s.name.lower()]
+
+    # Apply filters
+    if filter_type:
+        matching = analyzer.filter_symbols_by_type(matching, SymbolType(filter_type))
+    if language:
+        matching = [s for s in matching if s.language == language]
+
+    # Output results
+    if output in ["json", "yaml"]:
+        output_data = {
+            "query": query,
+            "matches_found": len(matching),
+            "symbols": [
+                {
+                    "name": s.name,
+                    "type": s.symbol_type.value,
+                    "file": s.file_path,
+                    "line": s.line_start,
+                    "signature": s.signature,
+                    "visibility": s.visibility,
+                    "language": s.language,
+                    "documentation": s.documentation
+                }
+                for s in sorted(matching, key=lambda s: (s.file_path, s.line_start or 0))
+            ]
+        }
+        if output == "json":
+            print(json.dumps(output_data, indent=2))
+        else:
+            import yaml
+            print(yaml.dump(output_data, default_flow_style=False, sort_keys=False))
+    else:
+        print(f"Search results for '{query}':\n")
+        print(f"Found {len(matching)} matching symbol(s)\n")
+
+        if matching:
+            for symbol in sorted(matching, key=lambda s: (s.file_path, s.line_start or 0)):
+                vis_icon = "🔒" if symbol.visibility == "private" else "🔓"
+                type_icon = {
+                    "function": "⚡",
+                    "method": "🔧",
+                    "class": "📦",
+                    "interface": "📋",
+                    "enum": "🔢"
+                }.get(symbol.symbol_type.value, "•")
+
+                print(f"{type_icon} {vis_icon} {symbol.name} ({symbol.symbol_type.value})")
+                print(f"   File: {symbol.file_path}:{symbol.line_start or 0}")
+                if symbol.signature:
+                    print(f"   Signature: {symbol.signature}")
+                if symbol.documentation:
+                    doc_preview = symbol.documentation[:60] + "..." if len(symbol.documentation) > 60 else symbol.documentation
+                    print(f"   📖 {doc_preview}")
+                print()
+        else:
+            print(f"No symbols found matching '{query}'")
+
+
+async def symbol_detail_command(
+    path: str,
+    symbol_name: str,
+    output: str = "text"
+):
+    """Get detailed information about a specific symbol."""
+    import os
+    import json
+    from pathlib import Path
+    from .analysis import CodeAnalyzer
+
+    analyzer = CodeAnalyzer()
+    path_obj = Path(path)
+
+    if not path_obj.exists():
+        print(f"Error: Path '{path}' does not exist")
+        return
+
+    # Collect files
+    files = {}
+    if path_obj.is_file():
+        if analyzer.detect_language(str(path_obj)):
+            with open(path_obj, 'r', encoding='utf-8') as f:
+                files[str(path_obj)] = f.read()
+    elif path_obj.is_dir():
+        for root, _, filenames in os.walk(path_obj):
+            for filename in filenames:
+                file_path = os.path.join(root, filename)
+                if analyzer.detect_language(filename):
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            files[file_path] = f.read()
+                    except (UnicodeDecodeError, PermissionError):
+                        continue
+
+    if not files:
+        print(f"No supported source files found in '{path}'")
+        return
+
+    # Analyze and find symbol
+    results = analyzer.analyze_files(files)
+    all_symbols = analyzer.aggregate_symbols(results)
+
+    # Find by exact name or qualified name
+    matching = [s for s in all_symbols
+                if s.name == symbol_name or s.qualified_name == symbol_name]
+
+    if not matching:
+        print(f"Symbol '{symbol_name}' not found")
+        return
+
+    symbol = matching[0]
+
+    # Output results
+    if output in ["json", "yaml"]:
+        output_data = {
+            "name": symbol.name,
+            "type": symbol.symbol_type.value,
+            "file": symbol.file_path,
+            "line_start": symbol.line_start,
+            "line_end": symbol.line_end,
+            "signature": symbol.signature,
+            "visibility": symbol.visibility,
+            "language": symbol.language,
+            "qualified_name": symbol.qualified_name,
+            "documentation": symbol.documentation,
+            "is_exported": symbol.is_exported,
+            "metadata": symbol.metadata
+        }
+        if len(matching) > 1:
+            output_data["other_matches"] = [
+                {"file": s.file_path, "line": s.line_start}
+                for s in matching[1:]
+            ]
+        if output == "json":
+            print(json.dumps(output_data, indent=2))
+        else:
+            import yaml
+            print(yaml.dump(output_data, default_flow_style=False, sort_keys=False))
+    else:
+        print(f"Symbol Detail: {symbol.name}\n")
+        print(f"{'='*60}")
+        print(f"Type:           {symbol.symbol_type.value}")
+        print(f"Language:       {symbol.language}")
+        print(f"File:           {symbol.file_path}")
+        if symbol.line_start:
+            if symbol.line_end:
+                print(f"Location:       Lines {symbol.line_start}-{symbol.line_end}")
+            else:
+                print(f"Location:       Line {symbol.line_start}")
+        print(f"Visibility:     {symbol.visibility}")
+        if symbol.qualified_name:
+            print(f"Qualified Name: {symbol.qualified_name}")
+        if symbol.signature:
+            print(f"\nSignature:\n  {symbol.signature}")
+        if symbol.documentation:
+            print(f"\nDocumentation:\n  {symbol.documentation}")
+        if symbol.is_exported:
+            print(f"\nExported: Yes")
+        if symbol.metadata:
+            print(f"\nMetadata:")
+            for key, value in symbol.metadata.items():
+                print(f"  {key}: {value}")
+
+        if len(matching) > 1:
+            print(f"\n{'='*60}")
+            print(f"Note: Found {len(matching)} symbols with this name.")
+            print("Other matches:")
+            for other in matching[1:]:
+                print(f"  - {other.file_path}:{other.line_start or 0}")
+
+
+async def file_symbols_command(
+    file_path: str,
+    output: str = "text",
+    group_by_type: bool = True
+):
+    """List all symbols in a specific file."""
+    import json
+    from pathlib import Path
+    from .analysis import CodeAnalyzer
+
+    path_obj = Path(file_path)
+
+    if not path_obj.exists():
+        print(f"Error: File '{file_path}' does not exist")
+        return
+
+    if not path_obj.is_file():
+        print(f"Error: '{file_path}' is not a file")
+        return
+
+    analyzer = CodeAnalyzer()
+
+    # Detect language
+    language = analyzer.detect_language(str(path_obj))
+    if not language:
+        print(f"Error: Unsupported file type for '{file_path}'")
+        print(f"Supported languages: {', '.join(analyzer.get_supported_languages())}")
+        return
+
+    # Read and analyze
+    try:
+        with open(path_obj, 'r', encoding='utf-8') as f:
+            code = f.read()
+    except UnicodeDecodeError:
+        print(f"Error: Cannot read '{file_path}' - not a text file")
+        return
+
+    symbols = analyzer.analyze_file(code, str(path_obj))
+
+    if not symbols:
+        print(f"No symbols found in '{file_path}'")
+        return
+
+    # Output results
+    if output in ["json", "yaml"]:
+        output_data = {
+            "file": file_path,
+            "language": language,
+            "total_symbols": len(symbols),
+            "symbols": [
+                {
+                    "name": s.name,
+                    "type": s.symbol_type.value,
+                    "line": s.line_start,
+                    "signature": s.signature,
+                    "visibility": s.visibility,
+                    "documentation": s.documentation
+                }
+                for s in sorted(symbols, key=lambda s: s.line_start or 0)
+            ]
+        }
+        if output == "json":
+            print(json.dumps(output_data, indent=2))
+        else:
+            import yaml
+            print(yaml.dump(output_data, default_flow_style=False, sort_keys=False))
+    else:
+        print(f"Symbols in {file_path}\n")
+        print(f"Language: {language}")
+        print(f"Total symbols: {len(symbols)}\n")
+        print(f"{'='*60}")
+
+        if group_by_type:
+            # Group by symbol type
+            by_type = {}
+            for symbol in symbols:
+                stype = symbol.symbol_type.value
+                if stype not in by_type:
+                    by_type[stype] = []
+                by_type[stype].append(symbol)
+
+            for stype, type_symbols in sorted(by_type.items()):
+                type_icon = {
+                    "function": "⚡",
+                    "method": "🔧",
+                    "class": "📦",
+                    "interface": "📋",
+                    "enum": "🔢"
+                }.get(stype, "•")
+                print(f"\n{type_icon} {stype.title()}s ({len(type_symbols)})")
+                print("-" * 40)
+                for symbol in sorted(type_symbols, key=lambda s: s.line_start or 0):
+                    vis_icon = "🔒" if symbol.visibility == "private" else "🔓"
+                    print(f"  {vis_icon} {symbol.name}", end="")
+                    if symbol.line_start:
+                        print(f" (Line {symbol.line_start})", end="")
+                    print()
+                    if symbol.signature:
+                        print(f"      {symbol.signature}")
+        else:
+            # Flat list
+            for symbol in sorted(symbols, key=lambda s: s.line_start or 0):
+                vis_icon = "🔒" if symbol.visibility == "private" else "🔓"
+                type_icon = {
+                    "function": "⚡",
+                    "method": "🔧",
+                    "class": "📦",
+                    "interface": "📋",
+                    "enum": "🔢"
+                }.get(symbol.symbol_type.value, "•")
+                print(f"{type_icon} {vis_icon} {symbol.name} ({symbol.symbol_type.value})", end="")
+                if symbol.line_start:
+                    print(f" - Line {symbol.line_start}", end="")
+                print()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,12 @@
-# Repository Context (`repo-ctx`)
+# The Repository toolkit `repo-ctx`
 
-A flexible Git repository documentation indexer and search tool with multiple interfaces:
+## For the Impatient
+
+For a  quick intro go to the **[USER_GUIDE](docs/USER_GUIDE.md)**
+
+## About
+
+This is a flexible Git repository documentation indexer and search tool with multiple interfaces:
 - **MCP Server** for LLM integration (primary use case, details see [docs/mcp_tools_reference.md](docs/mcp_tools_reference.md))
 - **CLI** for standalone searching
 - **Python library** for custom integrations
@@ -10,6 +16,8 @@ Supports **GitLab**, **GitHub**, and **local Git repositories** (including Enter
 ## Features
 
 - **Multi-provider support** - Index from GitLab, GitHub, and local Git repositories
+- **Code analysis** - Extract symbols (functions, classes, methods) from Python, JavaScript, TypeScript, and Java code
+- **Symbol search** - Find symbols by name with filtering by type and language
 - **Local repository indexing** - Index local repos without network access (offline work)
 - **GitHub public repos** - Works without authentication (with rate limits)
 - **Smart authentication fallback** - Falls back to unauthenticated access if token is invalid
@@ -40,7 +48,7 @@ uv pip install -e .
 
 ## MCP Tools Overview
 
-repo-ctx provides **6 MCP tools** for seamless integration with AI assistants like Claude Code, Kiro CLI, and GitHub Copilot.
+repo-ctx provides **10 MCP tools** for seamless integration with AI assistants like Claude Code, Kiro CLI, and GitHub Copilot.
 
 ### Workflow Diagram
 
@@ -91,6 +99,8 @@ graph TB
 
 ### Available Tools
 
+#### Repository Management & Search
+
 | Tool | Purpose | Example |
 |------|---------|---------|
 | **repo-ctx-index** | Index a single repository | Index `fastapi/fastapi` from GitHub |
@@ -99,6 +109,15 @@ graph TB
 | **repo-ctx-fuzzy-search** | Search with typo tolerance | Search `"fasapi"` → finds `"fastapi"` |
 | **repo-ctx-search** | Exact name search | Search for `"fastapi"` library |
 | **repo-ctx-docs** | Retrieve documentation | Get docs for `/fastapi/fastapi` |
+
+#### Code Analysis
+
+| Tool | Purpose | Example |
+|------|---------|---------|
+| **repo-ctx-analyze** | Analyze code and extract symbols | Analyze `./src` for Python, JS, TS, Java symbols |
+| **repo-ctx-search-symbol** | Search for symbols by name | Search for `"getUserById"` function |
+| **repo-ctx-get-symbol-detail** | Get detailed symbol information | Get details for `"UserService.createUser"` |
+| **repo-ctx-get-file-symbols** | Get all symbols in a file | List all functions/classes in `UserService.java` |
 
 **📚 Complete Tool Reference:** See [MCP Tools Reference](docs/mcp_tools_reference.md) for detailed parameters, examples, and best practices.
 
@@ -143,6 +162,44 @@ const results = await use_mcp_tool("repo-ctx", "repo-ctx-fuzzy-search", {
 const docs = await use_mcp_tool("repo-ctx", "repo-ctx-docs", {
   libraryId: "/mygroup/auth-service",
   topic: "api"  // Optional: filter by topic
+});
+```
+
+**Analyze code structure:**
+```javascript
+// Analyze a directory for Python, JavaScript, and TypeScript symbols
+const analysis = await use_mcp_tool("repo-ctx", "repo-ctx-analyze", {
+  path: "./src",
+  language: "python",     // Optional: filter by language
+  symbolType: "function"  // Optional: filter by type
+});
+```
+
+**Search for symbols:**
+```javascript
+// Find all symbols matching "user"
+const symbols = await use_mcp_tool("repo-ctx", "repo-ctx-search-symbol", {
+  path: "./src",
+  query: "user",
+  symbolType: "class"  // Optional: filter by type
+});
+```
+
+**Get symbol details:**
+```javascript
+// Get detailed information about a specific symbol
+const details = await use_mcp_tool("repo-ctx", "repo-ctx-get-symbol-detail", {
+  path: "./src",
+  symbolName: "UserService"
+});
+```
+
+**List file symbols:**
+```javascript
+// Get all symbols in a specific file
+const fileSymbols = await use_mcp_tool("repo-ctx", "repo-ctx-get-file-symbols", {
+  filePath: "./src/auth.py",
+  groupByType: true  // Optional: group by symbol type
 });
 ```
 
@@ -352,6 +409,52 @@ uv run repo-ctx docs mygroup/project/v1.0.0
 uv run repo-ctx docs mygroup/project --page 2
 ```
 
+#### Analyze Code Structure
+
+The `analyze` command extracts symbols (functions, classes, methods, interfaces, enums) from source code without requiring indexing.
+
+**Analyze local directory or file:**
+```bash
+# Analyze all supported languages in a directory
+uv run repo-ctx analyze ./src
+
+# Filter by language
+uv run repo-ctx analyze ./src --language python
+
+# Filter by symbol type
+uv run repo-ctx analyze ./src --filter-type class
+
+# Combine filters
+uv run repo-ctx analyze ./src --language java --filter-type method
+
+# Show dependencies
+uv run repo-ctx analyze ./src --show-dependencies
+
+# Output formats: text (default, human-readable), json (structured), yaml (structured)
+uv run repo-ctx analyze ./src --output text   # Human-readable with emojis
+uv run repo-ctx analyze ./src --output json   # Structured JSON
+uv run repo-ctx analyze ./src --output yaml   # Structured YAML
+```
+
+**Analyze remote repository (GitHub/GitLab):**
+```bash
+# GitHub public repository (no token needed)
+uv run repo-ctx --provider github analyze owner/repo --filter-type class
+
+# GitHub with authentication (for private repos or higher rate limits)
+export GITHUB_TOKEN="ghp-your-token"
+uv run repo-ctx --provider github analyze owner/private-repo --language java
+
+# GitLab repository
+export GITLAB_URL="https://gitlab.com"
+export GITLAB_TOKEN="glpat-your-token"
+uv run repo-ctx --provider gitlab analyze group/project --filter-type interface
+```
+
+**Supported languages:** Python, JavaScript, TypeScript, Java
+
+**Symbol types:** function, class, method, interface, enum
+
 #### Index a Repository
 
 **Local Repository:**
@@ -541,6 +644,7 @@ For complete MCP tool documentation including workflow diagrams, examples, and b
 
 **Quick Summary:**
 
+**Repository Management:**
 | Tool | Purpose |
 |------|---------|
 | `repo-ctx-index` | Index single repository (local, GitHub, GitLab) |
@@ -549,6 +653,14 @@ For complete MCP tool documentation including workflow diagrams, examples, and b
 | `repo-ctx-fuzzy-search` | Search with typo tolerance |
 | `repo-ctx-search` | Exact name search |
 | `repo-ctx-docs` | Retrieve documentation content |
+
+**Code Analysis (Python, JavaScript, TypeScript, Java):**
+| Tool | Purpose |
+|------|---------|
+| `repo-ctx-analyze` | Analyze code structure and extract symbols |
+| `repo-ctx-search-symbol` | Search for symbols by name or pattern |
+| `repo-ctx-get-symbol-detail` | Get detailed information about a symbol |
+| `repo-ctx-get-file-symbols` | List all symbols in a specific file |
 
 **Note:** All tools support **local, GitHub, and GitLab** repositories with auto-detection or explicit provider selection.
 

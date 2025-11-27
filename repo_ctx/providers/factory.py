@@ -134,8 +134,8 @@ class ProviderFactory:
 
         elif provider_type == "github":
             # GitHub token is optional for public repos
-            url = getattr(config, 'github_url', "https://api.github.com")
-            token = getattr(config, 'github_token', None)
+            url = config.github_url or "https://api.github.com"
+            token = config.github_token
             return cls.create_github(url=url, token=token)
 
         elif provider_type == "local":

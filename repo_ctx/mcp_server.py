@@ -172,6 +172,124 @@ async def serve(
                         }
                     }
                 }
+            ),
+            Tool(
+                name="repo-ctx-analyze",
+                description="Analyze source code to extract symbols (functions, classes, methods, etc.). Supports Python, JavaScript, TypeScript, and Java. Returns detailed symbol information including signatures, visibility, documentation, and location.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to file or directory to analyze (absolute or relative)"
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": "Optional: Filter by language (python, javascript, typescript, java, kotlin)",
+                            "enum": ["python", "javascript", "typescript", "java", "kotlin"]
+                        },
+                        "symbolType": {
+                            "type": "string",
+                            "description": "Optional: Filter by symbol type (function, class, method, interface, enum)",
+                            "enum": ["function", "class", "method", "interface", "enum"]
+                        },
+                        "includePrivate": {
+                            "type": "boolean",
+                            "description": "Include private symbols (default: true)",
+                            "default": True
+                        },
+                        "outputFormat": {
+                            "type": "string",
+                            "description": "Output format: text (human-readable with emojis), json (structured), yaml (structured)",
+                            "enum": ["text", "json", "yaml"],
+                            "default": "text"
+                        }
+                    },
+                    "required": ["path"]
+                }
+            ),
+            Tool(
+                name="repo-ctx-search-symbol",
+                description="Search for symbols by name or pattern across analyzed code. Use fuzzy matching to find functions, classes, methods even with partial names. Useful for code navigation and exploration. Supports Python, JavaScript, TypeScript, and Java.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to file or directory to search in"
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Search query (symbol name or pattern)"
+                        },
+                        "symbolType": {
+                            "type": "string",
+                            "description": "Optional: Filter by symbol type",
+                            "enum": ["function", "class", "method", "interface", "enum"]
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": "Optional: Filter by language",
+                            "enum": ["python", "javascript", "typescript", "java", "kotlin"]
+                        },
+                        "outputFormat": {
+                            "type": "string",
+                            "description": "Output format: text (human-readable), json (structured), yaml (structured)",
+                            "enum": ["text", "json", "yaml"],
+                            "default": "text"
+                        }
+                    },
+                    "required": ["path", "query"]
+                }
+            ),
+            Tool(
+                name="repo-ctx-get-symbol-detail",
+                description="Get detailed information about a specific symbol including its full signature, documentation, metadata, and source location. Use after finding a symbol with search-symbol.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to file or directory"
+                        },
+                        "symbolName": {
+                            "type": "string",
+                            "description": "Exact symbol name or qualified name (e.g., 'MyClass.method')"
+                        },
+                        "outputFormat": {
+                            "type": "string",
+                            "description": "Output format: text (human-readable), json (structured), yaml (structured)",
+                            "enum": ["text", "json", "yaml"],
+                            "default": "text"
+                        }
+                    },
+                    "required": ["path", "symbolName"]
+                }
+            ),
+            Tool(
+                name="repo-ctx-get-file-symbols",
+                description="Get all symbols defined in a specific file. Returns symbols organized by type with full details. Useful for understanding file structure.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "filePath": {
+                            "type": "string",
+                            "description": "Path to the source file"
+                        },
+                        "groupByType": {
+                            "type": "boolean",
+                            "description": "Group symbols by type (default: true)",
+                            "default": True
+                        },
+                        "outputFormat": {
+                            "type": "string",
+                            "description": "Output format: text (human-readable), json (structured), yaml (structured)",
+                            "enum": ["text", "json", "yaml"],
+                            "default": "text"
+                        }
+                    },
+                    "required": ["filePath"]
+                }
             )
         ]
     
@@ -360,6 +478,465 @@ async def serve(
                 return [TextContent(type="text", text="".join(output))]
             except Exception as e:
                 return [TextContent(type="text", text=f"Error listing repositories: {str(e)}")]
+
+        elif name == "repo-ctx-analyze":
+            from pathlib import Path
+            from .analysis import CodeAnalyzer, SymbolType
+            import os
+
+            path = arguments["path"]
+            language_filter = arguments.get("language")
+            symbol_type_filter = arguments.get("symbolType")
+            include_private = arguments.get("includePrivate", True)
+            output_format = arguments.get("outputFormat", "text")
+
+            try:
+                analyzer = CodeAnalyzer()
+                path_obj = Path(path)
+
+                if not path_obj.exists():
+                    return [TextContent(type="text", text=f"Error: Path '{path}' does not exist")]
+
+                # Collect files to analyze
+                files = {}
+                if path_obj.is_file():
+                    if analyzer.detect_language(str(path_obj)):
+                        with open(path_obj, 'r', encoding='utf-8') as f:
+                            files[str(path_obj)] = f.read()
+                elif path_obj.is_dir():
+                    for root, _, filenames in os.walk(path_obj):
+                        for filename in filenames:
+                            file_path = os.path.join(root, filename)
+                            if analyzer.detect_language(filename):
+                                try:
+                                    with open(file_path, 'r', encoding='utf-8') as f:
+                                        files[file_path] = f.read()
+                                except (UnicodeDecodeError, PermissionError):
+                                    continue
+
+                if not files:
+                    return [TextContent(type="text", text=f"No supported files found in '{path}'")]
+
+                # Analyze files
+                results = analyzer.analyze_files(files)
+                all_symbols = analyzer.aggregate_symbols(results)
+
+                # Apply filters
+                if language_filter:
+                    all_symbols = [s for s in all_symbols if s.language == language_filter]
+                if symbol_type_filter:
+                    all_symbols = analyzer.filter_symbols_by_type(all_symbols, SymbolType(symbol_type_filter))
+                if not include_private:
+                    all_symbols = analyzer.filter_symbols_by_visibility(all_symbols, "public")
+
+                # Get statistics
+                stats = analyzer.get_statistics(all_symbols)
+
+                # Format output based on outputFormat
+                if output_format in ["json", "yaml"]:
+                    import json
+                    # Structured output
+                    output_data = {
+                        "path": str(path),
+                        "files_analyzed": len(files),
+                        "statistics": stats,
+                        "symbols": [
+                            {
+                                "name": s.name,
+                                "type": s.symbol_type.value,
+                                "file": s.file_path,
+                                "line": s.line_start,
+                                "signature": s.signature,
+                                "visibility": s.visibility,
+                                "language": s.language,
+                                "qualified_name": s.qualified_name,
+                                "documentation": s.documentation
+                            }
+                            for s in all_symbols
+                        ]
+                    }
+                    if output_format == "json":
+                        return [TextContent(type="text", text=json.dumps(output_data, indent=2))]
+                    else:  # yaml
+                        import yaml
+                        return [TextContent(type="text", text=yaml.dump(output_data, default_flow_style=False, sort_keys=False))]
+                else:
+                    # Text output with emojis
+                    output = []
+                    output.append(f"📊 Code Analysis Results for '{path}':\n\n")
+
+                    output.append(f"**Summary:**\n")
+                    output.append(f"- Total symbols: {stats['total_symbols']}\n")
+                    output.append(f"- Files analyzed: {len(files)}\n\n")
+
+                    output.append("**Symbols by type:**\n")
+                    for stype, count in stats['by_type'].items():
+                        output.append(f"- {stype}: {count}\n")
+                    output.append("\n")
+
+                    # Group by file
+                    by_file = {}
+                    for symbol in all_symbols:
+                        if symbol.file_path not in by_file:
+                            by_file[symbol.file_path] = []
+                        by_file[symbol.file_path].append(symbol)
+
+                    output.append("**Symbols by file:**\n\n")
+                    for file_path, symbols in sorted(by_file.items()):
+                        output.append(f"### 📄 {file_path}\n")
+                        for symbol in sorted(symbols, key=lambda s: s.line_start or 0):
+                            visibility_marker = "🔒" if symbol.visibility == "private" else "🔓"
+                            output.append(f"- {visibility_marker} `{symbol.name}` ({symbol.symbol_type.value})")
+                            if symbol.signature:
+                                output.append(f" - {symbol.signature}")
+                            if symbol.line_start:
+                                output.append(f" - Line {symbol.line_start}")
+                            output.append("\n")
+                        output.append("\n")
+
+                    return [TextContent(type="text", text="".join(output))]
+            except Exception as e:
+                return [TextContent(type="text", text=f"Error analyzing code: {str(e)}")]
+
+        elif name == "repo-ctx-search-symbol":
+            from pathlib import Path
+            from .analysis import CodeAnalyzer, SymbolType
+            import os
+
+            path = arguments["path"]
+            query = arguments["query"].lower()
+            symbol_type_filter = arguments.get("symbolType")
+            language_filter = arguments.get("language")
+            output_format = arguments.get("outputFormat", "text")
+
+            try:
+                analyzer = CodeAnalyzer()
+                path_obj = Path(path)
+
+                if not path_obj.exists():
+                    return [TextContent(type="text", text=f"Error: Path '{path}' does not exist")]
+
+                # Collect and analyze files
+                files = {}
+                if path_obj.is_file():
+                    if analyzer.detect_language(str(path_obj)):
+                        with open(path_obj, 'r', encoding='utf-8') as f:
+                            files[str(path_obj)] = f.read()
+                elif path_obj.is_dir():
+                    for root, _, filenames in os.walk(path_obj):
+                        for filename in filenames:
+                            file_path = os.path.join(root, filename)
+                            if analyzer.detect_language(filename):
+                                try:
+                                    with open(file_path, 'r', encoding='utf-8') as f:
+                                        files[file_path] = f.read()
+                                except (UnicodeDecodeError, PermissionError):
+                                    continue
+
+                if not files:
+                    return [TextContent(type="text", text=f"No supported files found in '{path}'")]
+
+                # Analyze and filter
+                results = analyzer.analyze_files(files)
+                all_symbols = analyzer.aggregate_symbols(results)
+
+                # Search by name (case-insensitive substring match)
+                matching = [s for s in all_symbols if query in s.name.lower()]
+
+                # Apply additional filters
+                if symbol_type_filter:
+                    matching = analyzer.filter_symbols_by_type(matching, SymbolType(symbol_type_filter))
+                if language_filter:
+                    matching = [s for s in matching if s.language == language_filter]
+
+                # Format output based on outputFormat
+                if output_format in ["json", "yaml"]:
+                    import json
+                    output_data = {
+                        "query": query,
+                        "matches_found": len(matching),
+                        "symbols": [
+                            {
+                                "name": s.name,
+                                "type": s.symbol_type.value,
+                                "file": s.file_path,
+                                "line": s.line_start,
+                                "signature": s.signature,
+                                "visibility": s.visibility,
+                                "language": s.language,
+                                "documentation": s.documentation
+                            }
+                            for s in sorted(matching, key=lambda s: (s.file_path, s.line_start or 0))
+                        ]
+                    }
+                    if output_format == "json":
+                        return [TextContent(type="text", text=json.dumps(output_data, indent=2))]
+                    else:  # yaml
+                        import yaml
+                        return [TextContent(type="text", text=yaml.dump(output_data, default_flow_style=False, sort_keys=False))]
+                else:
+                    # Text output
+                    output = []
+                    output.append(f"🔍 Symbol search results for '{query}':\n\n")
+                    output.append(f"Found {len(matching)} matching symbol(s)\n\n")
+
+                    if matching:
+                        for symbol in sorted(matching, key=lambda s: (s.file_path, s.line_start or 0)):
+                            output.append(f"**{symbol.name}** ({symbol.symbol_type.value})\n")
+                            output.append(f"- File: {symbol.file_path}")
+                            if symbol.line_start:
+                                output.append(f":{symbol.line_start}")
+                            output.append("\n")
+                            if symbol.signature:
+                                output.append(f"- Signature: `{symbol.signature}`\n")
+                            if symbol.documentation:
+                                output.append(f"- Documentation: {symbol.documentation}\n")
+                            output.append(f"- Visibility: {symbol.visibility}\n")
+                            output.append("\n")
+                    else:
+                        output.append(f"No symbols found matching '{query}'\n")
+
+                    return [TextContent(type="text", text="".join(output))]
+            except Exception as e:
+                return [TextContent(type="text", text=f"Error searching symbols: {str(e)}")]
+
+        elif name == "repo-ctx-get-symbol-detail":
+            from pathlib import Path
+            from .analysis import CodeAnalyzer
+            import os
+            import json
+
+            path = arguments["path"]
+            symbol_name = arguments["symbolName"]
+            output_format = arguments.get("outputFormat", "text")
+
+            try:
+                analyzer = CodeAnalyzer()
+                path_obj = Path(path)
+
+                if not path_obj.exists():
+                    return [TextContent(type="text", text=f"Error: Path '{path}' does not exist")]
+
+                # Collect and analyze files
+                files = {}
+                if path_obj.is_file():
+                    if analyzer.detect_language(str(path_obj)):
+                        with open(path_obj, 'r', encoding='utf-8') as f:
+                            files[str(path_obj)] = f.read()
+                elif path_obj.is_dir():
+                    for root, _, filenames in os.walk(path_obj):
+                        for filename in filenames:
+                            file_path = os.path.join(root, filename)
+                            if analyzer.detect_language(filename):
+                                try:
+                                    with open(file_path, 'r', encoding='utf-8') as f:
+                                        files[file_path] = f.read()
+                                except (UnicodeDecodeError, PermissionError):
+                                    continue
+
+                if not files:
+                    return [TextContent(type="text", text=f"No supported files found in '{path}'")]
+
+                # Analyze and find symbol
+                results = analyzer.analyze_files(files)
+                all_symbols = analyzer.aggregate_symbols(results)
+
+                # Find by exact name or qualified name
+                matching = [s for s in all_symbols
+                           if s.name == symbol_name or s.qualified_name == symbol_name]
+
+                if not matching:
+                    return [TextContent(type="text", text=f"Symbol '{symbol_name}' not found")]
+
+                symbol = matching[0]
+
+                # Format output based on outputFormat
+                if output_format in ["json", "yaml"]:
+                    output_data = {
+                        "name": symbol.name,
+                        "type": symbol.symbol_type.value,
+                        "language": symbol.language,
+                        "file": symbol.file_path,
+                        "line_start": symbol.line_start,
+                        "line_end": symbol.line_end,
+                        "visibility": symbol.visibility,
+                        "qualified_name": symbol.qualified_name,
+                        "signature": symbol.signature,
+                        "documentation": symbol.documentation,
+                        "is_exported": symbol.is_exported,
+                        "metadata": symbol.metadata
+                    }
+                    if len(matching) > 1:
+                        output_data["other_matches"] = [
+                            {"file": s.file_path, "line": s.line_start}
+                            for s in matching[1:]
+                        ]
+                    if output_format == "json":
+                        return [TextContent(type="text", text=json.dumps(output_data, indent=2))]
+                    else:  # yaml
+                        import yaml
+                        return [TextContent(type="text", text=yaml.dump(output_data, default_flow_style=False, sort_keys=False))]
+                else:
+                    # Text output
+                    output = []
+                    output.append(f"# Symbol Detail: {symbol.name}\n\n")
+                    output.append(f"**Type:** {symbol.symbol_type.value}\n")
+                    output.append(f"**Language:** {symbol.language}\n")
+                    output.append(f"**File:** {symbol.file_path}\n")
+                    if symbol.line_start:
+                        if symbol.line_end:
+                            output.append(f"**Location:** Lines {symbol.line_start}-{symbol.line_end}\n")
+                        else:
+                            output.append(f"**Location:** Line {symbol.line_start}\n")
+                    output.append(f"**Visibility:** {symbol.visibility}\n")
+
+                    if symbol.qualified_name:
+                        output.append(f"**Qualified Name:** {symbol.qualified_name}\n")
+
+                    if symbol.signature:
+                        output.append(f"\n**Signature:**\n```{symbol.language}\n{symbol.signature}\n```\n")
+
+                    if symbol.documentation:
+                        output.append(f"\n**Documentation:**\n{symbol.documentation}\n")
+
+                    if symbol.is_exported:
+                        output.append(f"\n**Exported:** Yes\n")
+
+                    if symbol.metadata:
+                        output.append(f"\n**Metadata:**\n")
+                        for key, value in symbol.metadata.items():
+                            output.append(f"- {key}: {value}\n")
+
+                    # Show other matches if any
+                    if len(matching) > 1:
+                        output.append(f"\n---\n\n**Note:** Found {len(matching)} symbols with this name. Showing details for the first match.\n")
+                        output.append("\nOther matches:\n")
+                        for other in matching[1:]:
+                            output.append(f"- {other.file_path}")
+                            if other.line_start:
+                                output.append(f":{other.line_start}")
+                            output.append("\n")
+
+                    return [TextContent(type="text", text="".join(output))]
+            except Exception as e:
+                return [TextContent(type="text", text=f"Error getting symbol details: {str(e)}")]
+
+        elif name == "repo-ctx-get-file-symbols":
+            from pathlib import Path
+            from .analysis import CodeAnalyzer
+            import json
+
+            file_path = arguments["filePath"]
+            group_by_type = arguments.get("groupByType", True)
+            output_format = arguments.get("outputFormat", "text")
+
+            try:
+                path_obj = Path(file_path)
+
+                if not path_obj.exists():
+                    return [TextContent(type="text", text=f"Error: File '{file_path}' does not exist")]
+
+                if not path_obj.is_file():
+                    return [TextContent(type="text", text=f"Error: '{file_path}' is not a file")]
+
+                analyzer = CodeAnalyzer()
+
+                # Detect language
+                language = analyzer.detect_language(str(path_obj))
+                if not language:
+                    return [TextContent(type="text", text=f"Error: Unsupported file type for '{file_path}'")]
+
+                # Read and analyze
+                with open(path_obj, 'r', encoding='utf-8') as f:
+                    code = f.read()
+
+                symbols = analyzer.analyze_file(code, str(path_obj))
+
+                if not symbols:
+                    return [TextContent(type="text", text=f"No symbols found in '{file_path}'")]
+
+                # Format output based on outputFormat
+                if output_format in ["json", "yaml"]:
+                    output_data = {
+                        "file": file_path,
+                        "language": language,
+                        "total_symbols": len(symbols),
+                        "symbols": [
+                            {
+                                "name": s.name,
+                                "type": s.symbol_type.value,
+                                "line": s.line_start,
+                                "line_end": s.line_end,
+                                "signature": s.signature,
+                                "visibility": s.visibility,
+                                "qualified_name": s.qualified_name,
+                                "documentation": s.documentation
+                            }
+                            for s in sorted(symbols, key=lambda s: s.line_start or 0)
+                        ]
+                    }
+                    if group_by_type:
+                        # Also include grouped view
+                        by_type = {}
+                        for s in symbols:
+                            stype = s.symbol_type.value
+                            if stype not in by_type:
+                                by_type[stype] = []
+                            by_type[stype].append(s.name)
+                        output_data["symbols_by_type"] = by_type
+
+                    if output_format == "json":
+                        return [TextContent(type="text", text=json.dumps(output_data, indent=2))]
+                    else:  # yaml
+                        import yaml
+                        return [TextContent(type="text", text=yaml.dump(output_data, default_flow_style=False, sort_keys=False))]
+                else:
+                    # Text output
+                    output = []
+                    output.append(f"# Symbols in {file_path}\n\n")
+                    output.append(f"**Language:** {language}\n")
+                    output.append(f"**Total symbols:** {len(symbols)}\n\n")
+
+                    if group_by_type:
+                        # Group by symbol type
+                        by_type = {}
+                        for symbol in symbols:
+                            stype = symbol.symbol_type.value
+                            if stype not in by_type:
+                                by_type[stype] = []
+                            by_type[stype].append(symbol)
+
+                        for stype, type_symbols in sorted(by_type.items()):
+                            output.append(f"## {stype.title()}s ({len(type_symbols)})\n\n")
+                            for symbol in sorted(type_symbols, key=lambda s: s.line_start or 0):
+                                visibility_marker = "🔒" if symbol.visibility == "private" else "🔓"
+                                output.append(f"- {visibility_marker} **{symbol.name}**")
+                                if symbol.line_start:
+                                    output.append(f" (Line {symbol.line_start})")
+                                output.append("\n")
+                                if symbol.signature:
+                                    output.append(f"  - Signature: `{symbol.signature}`\n")
+                                if symbol.documentation:
+                                    # Truncate long docs
+                                    doc = symbol.documentation[:100] + "..." if len(symbol.documentation) > 100 else symbol.documentation
+                                    output.append(f"  - {doc}\n")
+                            output.append("\n")
+                    else:
+                        # Flat list
+                        for symbol in sorted(symbols, key=lambda s: s.line_start or 0):
+                            visibility_marker = "🔒" if symbol.visibility == "private" else "🔓"
+                            output.append(f"- {visibility_marker} **{symbol.name}** ({symbol.symbol_type.value})")
+                            if symbol.line_start:
+                                output.append(f" - Line {symbol.line_start}")
+                            if symbol.signature:
+                                output.append(f" - `{symbol.signature}`")
+                            output.append("\n")
+
+                    return [TextContent(type="text", text="".join(output))]
+            except UnicodeDecodeError:
+                return [TextContent(type="text", text=f"Error: Cannot read '{file_path}' - not a text file")]
+            except Exception as e:
+                return [TextContent(type="text", text=f"Error analyzing file: {str(e)}")]
 
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
