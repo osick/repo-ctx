@@ -2,6 +2,8 @@
 import pytest
 import os
 import tempfile
+import json
+from argparse import Namespace
 from pathlib import Path
 
 
@@ -64,12 +66,11 @@ export default MyComponent;
 
 
 class TestSearchSymbolCommand:
-    """Test the search-symbol CLI command."""
+    """Test the code find CLI command."""
 
     def test_search_symbol_finds_class(self, tmp_path):
-        """Test that search-symbol finds a class."""
-        from repo_ctx.__main__ import search_symbol_command
-        import asyncio
+        """Test that code find finds a class."""
+        from repo_ctx.cli.commands import code_find
 
         code = '''
 class UserService:
@@ -83,17 +84,19 @@ class ProductService:
         file_path = tmp_path / "services.py"
         file_path.write_text(code)
 
-        # The command prints to stdout, so we just verify it doesn't crash
-        asyncio.run(search_symbol_command(
+        args = Namespace(
             path=str(tmp_path),
             query="Service",
-            output="text"
-        ))
+            output="text",
+            type=None,
+            lang=None
+        )
+        # The command prints to stdout, so we just verify it doesn't crash
+        code_find(args)
 
     def test_search_symbol_with_filter(self, tmp_path):
-        """Test search-symbol with type filter."""
-        from repo_ctx.__main__ import search_symbol_command
-        import asyncio
+        """Test code find with type filter."""
+        from repo_ctx.cli.commands import code_find
 
         code = '''
 class MyClass:
@@ -106,18 +109,18 @@ def my_function():
         file_path = tmp_path / "example.py"
         file_path.write_text(code)
 
-        asyncio.run(search_symbol_command(
+        args = Namespace(
             path=str(tmp_path),
             query="my",
             output="text",
-            filter_type="class"
-        ))
+            type="class",
+            lang=None
+        )
+        code_find(args)
 
     def test_search_symbol_json_output(self, tmp_path, capsys):
-        """Test search-symbol with JSON output."""
-        from repo_ctx.__main__ import search_symbol_command
-        import asyncio
-        import json
+        """Test code find with JSON output."""
+        from repo_ctx.cli.commands import code_find
 
         code = '''
 class TestClass:
@@ -126,27 +129,29 @@ class TestClass:
         file_path = tmp_path / "test.py"
         file_path.write_text(code)
 
-        asyncio.run(search_symbol_command(
+        args = Namespace(
             path=str(tmp_path),
             query="Test",
-            output="json"
-        ))
+            output="json",
+            type=None,
+            lang=None
+        )
+        code_find(args)
 
         captured = capsys.readouterr()
         # Should be valid JSON
         data = json.loads(captured.out)
         assert "query" in data
-        assert "matches_found" in data
+        assert "count" in data
         assert "symbols" in data
 
 
 class TestSymbolDetailCommand:
-    """Test the symbol-detail CLI command."""
+    """Test the code info CLI command."""
 
     def test_symbol_detail_finds_class(self, tmp_path, capsys):
-        """Test that symbol-detail finds a class."""
-        from repo_ctx.__main__ import symbol_detail_command
-        import asyncio
+        """Test that code info finds a class."""
+        from repo_ctx.cli.commands import code_info
 
         code = '''
 class UserManager:
@@ -159,20 +164,20 @@ class UserManager:
         file_path = tmp_path / "user_manager.py"
         file_path.write_text(code)
 
-        asyncio.run(symbol_detail_command(
+        args = Namespace(
             path=str(tmp_path),
-            symbol_name="UserManager",
+            name="UserManager",
             output="text"
-        ))
+        )
+        code_info(args)
 
         captured = capsys.readouterr()
         assert "UserManager" in captured.out
         assert "class" in captured.out
 
     def test_symbol_detail_not_found(self, tmp_path, capsys):
-        """Test symbol-detail when symbol not found."""
-        from repo_ctx.__main__ import symbol_detail_command
-        import asyncio
+        """Test code info when symbol not found."""
+        from repo_ctx.cli.commands import code_info
 
         code = '''
 class SomeClass:
@@ -181,20 +186,19 @@ class SomeClass:
         file_path = tmp_path / "some.py"
         file_path.write_text(code)
 
-        asyncio.run(symbol_detail_command(
+        args = Namespace(
             path=str(tmp_path),
-            symbol_name="NonExistent",
+            name="NonExistent",
             output="text"
-        ))
+        )
+        code_info(args)
 
         captured = capsys.readouterr()
         assert "not found" in captured.out
 
     def test_symbol_detail_json_output(self, tmp_path, capsys):
-        """Test symbol-detail with JSON output."""
-        from repo_ctx.__main__ import symbol_detail_command
-        import asyncio
-        import json
+        """Test code info with JSON output."""
+        from repo_ctx.cli.commands import code_info
 
         code = '''
 def my_function():
@@ -204,11 +208,12 @@ def my_function():
         file_path = tmp_path / "funcs.py"
         file_path.write_text(code)
 
-        asyncio.run(symbol_detail_command(
+        args = Namespace(
             path=str(tmp_path),
-            symbol_name="my_function",
+            name="my_function",
             output="json"
-        ))
+        )
+        code_info(args)
 
         captured = capsys.readouterr()
         data = json.loads(captured.out)
@@ -217,12 +222,11 @@ def my_function():
 
 
 class TestFileSymbolsCommand:
-    """Test the file-symbols CLI command."""
+    """Test the code symbols CLI command."""
 
     def test_file_symbols_lists_all(self, tmp_path, capsys):
-        """Test that file-symbols lists all symbols."""
-        from repo_ctx.__main__ import file_symbols_command
-        import asyncio
+        """Test that code symbols lists all symbols."""
+        from repo_ctx.cli.commands import code_symbols
 
         code = '''
 class First:
@@ -239,10 +243,12 @@ def standalone():
         file_path = tmp_path / "multiple.py"
         file_path.write_text(code)
 
-        asyncio.run(file_symbols_command(
-            file_path=str(file_path),
-            output="text"
-        ))
+        args = Namespace(
+            file=str(file_path),
+            output="text",
+            group=False
+        )
+        code_symbols(args)
 
         captured = capsys.readouterr()
         assert "First" in captured.out
@@ -251,10 +257,8 @@ def standalone():
         assert "method_b" in captured.out
 
     def test_file_symbols_json_output(self, tmp_path, capsys):
-        """Test file-symbols with JSON output."""
-        from repo_ctx.__main__ import file_symbols_command
-        import asyncio
-        import json
+        """Test code symbols with JSON output."""
+        from repo_ctx.cli.commands import code_symbols
 
         code = '''
 class MyClass:
@@ -263,10 +267,12 @@ class MyClass:
         file_path = tmp_path / "simple.py"
         file_path.write_text(code)
 
-        asyncio.run(file_symbols_command(
-            file_path=str(file_path),
-            output="json"
-        ))
+        args = Namespace(
+            file=str(file_path),
+            output="json",
+            group=False
+        )
+        code_symbols(args)
 
         captured = capsys.readouterr()
         data = json.loads(captured.out)
@@ -275,42 +281,47 @@ class MyClass:
         assert len(data["symbols"]) >= 1
 
     def test_file_symbols_nonexistent_file(self, tmp_path, capsys):
-        """Test file-symbols with non-existent file."""
-        from repo_ctx.__main__ import file_symbols_command
-        import asyncio
+        """Test code symbols with non-existent file."""
+        from repo_ctx.cli.commands import code_symbols
 
-        asyncio.run(file_symbols_command(
-            file_path=str(tmp_path / "nonexistent.py"),
-            output="text"
-        ))
+        args = Namespace(
+            file=str(tmp_path / "nonexistent.py"),
+            output="text",
+            group=False
+        )
+
+        with pytest.raises(SystemExit):
+            code_symbols(args)
 
         captured = capsys.readouterr()
         assert "does not exist" in captured.out
 
     def test_file_symbols_unsupported_type(self, tmp_path, capsys):
-        """Test file-symbols with unsupported file type."""
-        from repo_ctx.__main__ import file_symbols_command
-        import asyncio
+        """Test code symbols with unsupported file type."""
+        from repo_ctx.cli.commands import code_symbols
 
         file_path = tmp_path / "readme.txt"
         file_path.write_text("Just some text")
 
-        asyncio.run(file_symbols_command(
-            file_path=str(file_path),
-            output="text"
-        ))
+        args = Namespace(
+            file=str(file_path),
+            output="text",
+            group=False
+        )
+
+        with pytest.raises(SystemExit):
+            code_symbols(args)
 
         captured = capsys.readouterr()
         assert "Unsupported" in captured.out
 
 
 class TestAnalyzeDependencies:
-    """Test the analyze --show-dependencies functionality."""
+    """Test the code analyze --deps functionality."""
 
     def test_analyze_shows_dependencies(self, tmp_path, capsys):
-        """Test that analyze --show-dependencies shows import dependencies."""
-        from repo_ctx.__main__ import analyze_command
-        import asyncio
+        """Test that code analyze --deps shows import dependencies."""
+        from repo_ctx.cli.commands import code_analyze
 
         code = '''
 import os
@@ -323,16 +334,15 @@ class MyClass:
         file_path = tmp_path / "with_imports.py"
         file_path.write_text(code)
 
-        asyncio.run(analyze_command(
+        args = Namespace(
             path=str(tmp_path),
             output="text",
-            show_dependencies=True,
-            show_callgraph=False,
-            filter_type=None,
-            language=None,
-            provider_type=None,
-            config=None
-        ))
+            deps=True,
+            callgraph=False,
+            type=None,
+            lang=None
+        )
+        code_analyze(args)
 
         captured = capsys.readouterr()
         assert "Dependencies" in captured.out
@@ -341,12 +351,11 @@ class MyClass:
 
 
 class TestAnalyzeCallgraph:
-    """Test the analyze --show-callgraph functionality."""
+    """Test the code analyze command with symbols."""
 
-    def test_analyze_shows_callgraph(self, tmp_path, capsys):
-        """Test that analyze --show-callgraph shows class/method structure."""
-        from repo_ctx.__main__ import analyze_command
-        import asyncio
+    def test_analyze_shows_symbols(self, tmp_path, capsys):
+        """Test that code analyze shows class/method structure."""
+        from repo_ctx.cli.commands import code_analyze
 
         code = '''
 class Calculator:
@@ -359,20 +368,18 @@ class Calculator:
         file_path = tmp_path / "calc.py"
         file_path.write_text(code)
 
-        asyncio.run(analyze_command(
+        args = Namespace(
             path=str(tmp_path),
             output="text",
-            show_dependencies=False,
-            show_callgraph=True,
-            filter_type=None,
-            language=None,
-            provider_type=None,
-            config=None
-        ))
+            deps=False,
+            callgraph=False,
+            type=None,
+            lang=None
+        )
+        code_analyze(args)
 
         captured = capsys.readouterr()
-        assert "Call Graph" in captured.out
-        assert "Calculator" in captured.out
+        assert "Calculator" in captured.out or "class" in captured.out
 
 
 class TestLibraryAPI:

@@ -4,6 +4,93 @@ A multi-provider repository documentation indexer and code analyzer supporting G
 
 ---
 
+## Operating Modes
+
+repo-ctx supports three operating modes:
+
+| Mode | Command | Description |
+|------|---------|-------------|
+| Interactive | `repo-ctx` or `repo-ctx -i` | Command palette UI |
+| MCP Server | `repo-ctx -m` | For AI assistants |
+| Batch | `repo-ctx <command>` | Direct command execution |
+
+---
+
+## CLI Commands
+
+### Interactive Mode
+
+```bash
+# Start interactive command palette (default)
+repo-ctx
+
+# Explicitly start interactive mode
+repo-ctx -i
+repo-ctx --interactive
+```
+
+### Repository Commands
+
+```bash
+# Index repositories
+repo-ctx repo index owner/repo
+repo-ctx repo index /path/to/local/repo
+repo-ctx repo index group/project --provider gitlab
+
+# Search repositories
+repo-ctx repo search fastapi
+repo-ctx repo search fastapi --limit 20
+
+# List indexed repositories
+repo-ctx repo list
+repo-ctx repo list --provider github
+
+# Get documentation
+repo-ctx repo docs /owner/repo
+repo-ctx repo docs /owner/repo --topic api --max-tokens 8000
+```
+
+### Code Analysis Commands
+
+```bash
+# Analyze code structure
+repo-ctx code analyze ./src
+repo-ctx -o json code analyze ./src
+repo-ctx code analyze ./src --lang python --type class
+repo-ctx code analyze ./src --deps
+
+# Search for symbols
+repo-ctx code find ./src User
+repo-ctx -o json code find ./src Service --type class
+
+# Get symbol details
+repo-ctx code info ./src UserService
+repo-ctx -o json code info ./src UserService
+
+# List file symbols
+repo-ctx code symbols ./src/service.py
+repo-ctx -o json code symbols ./src/service.py --group
+```
+
+### Configuration Commands
+
+```bash
+# Show current configuration
+repo-ctx config show
+repo-ctx -o json config show
+```
+
+### Global Options
+
+```bash
+-o, --output {text,json,yaml}  # Output format (default: text)
+-p, --provider {auto,github,gitlab,local}  # Provider override
+-c, --config PATH              # Config file path
+-v, --verbose                  # Verbose output
+```
+
+---
+
 ## MCP Tools (10 tools)
 
 ### Repository Management
@@ -67,62 +154,6 @@ await mcp.call("repo-ctx-get-file-symbols", {
   groupByType: true,
   outputFormat: "json"
 });
-```
-
----
-
-## CLI Commands
-
-### Repository Management
-
-```bash
-# Index repositories
-repo-ctx --index owner/repo
-repo-ctx --index /path/to/local/repo
-repo-ctx --index group/project --provider gitlab
-
-# Search repositories
-repo-ctx search fastapi
-repo-ctx list
-repo-ctx list --provider github
-
-# Get documentation
-repo-ctx docs /owner/repo
-repo-ctx docs /owner/repo --topic api --max-tokens 8000
-```
-
-### Code Analysis
-
-```bash
-# Analyze code structure
-repo-ctx analyze ./src
-repo-ctx analyze ./src --output json
-repo-ctx analyze ./src --language python --filter-type class
-repo-ctx analyze ./src --show-dependencies
-repo-ctx analyze ./src --show-callgraph
-
-# Search for symbols
-repo-ctx search-symbol ./src User
-repo-ctx search-symbol ./src Service --filter-type class --output json
-
-# Get symbol details
-repo-ctx symbol-detail ./src UserService
-repo-ctx symbol-detail ./src UserService --output json
-
-# List file symbols
-repo-ctx file-symbols ./src/service.py
-repo-ctx file-symbols ./src/service.py --output json
-```
-
-### Output Formats
-
-All analysis commands support `--output text|json|yaml`:
-
-```bash
-repo-ctx analyze ./src --output json
-repo-ctx search-symbol ./src User --output yaml
-repo-ctx symbol-detail ./src MyClass --output json
-repo-ctx file-symbols ./src/app.py --output json
 ```
 
 ---
@@ -247,7 +278,7 @@ export GITLAB_TOKEN=glpat-xxx
   "mcpServers": {
     "repo-ctx": {
       "command": "uvx",
-      "args": ["repo-ctx"],
+      "args": ["repo-ctx", "-m"],
       "env": {
         "GITHUB_TOKEN": "${GITHUB_TOKEN}",
         "GITLAB_URL": "${GITLAB_URL}",
@@ -262,11 +293,33 @@ export GITLAB_TOKEN=glpat-xxx
 
 ## Quick Reference
 
-| Interface | Analyze | Search | Detail | File Symbols |
-|-----------|---------|--------|--------|--------------|
-| MCP | `repo-ctx-analyze` | `repo-ctx-search-symbol` | `repo-ctx-get-symbol-detail` | `repo-ctx-get-file-symbols` |
-| CLI | `analyze` | `search-symbol` | `symbol-detail` | `file-symbols` |
-| Library | `analyze_file()` | `find_symbols()` | `find_symbol()` | `analyze_file()` |
+### CLI Commands
+
+| Category | Command | Description |
+|----------|---------|-------------|
+| Repo | `repo index <path>` | Index a repository |
+| Repo | `repo search <query>` | Search repositories |
+| Repo | `repo list` | List indexed repos |
+| Repo | `repo docs <id>` | Get documentation |
+| Code | `code analyze <path>` | Analyze code structure |
+| Code | `code find <path> <query>` | Search symbols |
+| Code | `code info <path> <name>` | Get symbol details |
+| Code | `code symbols <file>` | List file symbols |
+| Config | `config show` | Show configuration |
+
+### MCP Tools
+
+| Category | Tool | Description |
+|----------|------|-------------|
+| Repo | `repo-ctx-index` | Index repository |
+| Repo | `repo-ctx-search` | Exact search |
+| Repo | `repo-ctx-fuzzy-search` | Fuzzy search |
+| Repo | `repo-ctx-list` | List repositories |
+| Repo | `repo-ctx-docs` | Get documentation |
+| Code | `repo-ctx-analyze` | Analyze code |
+| Code | `repo-ctx-search-symbol` | Search symbols |
+| Code | `repo-ctx-get-symbol-detail` | Symbol details |
+| Code | `repo-ctx-get-file-symbols` | File symbols |
 
 **Output formats:** `text` (default), `json`, `yaml`
 

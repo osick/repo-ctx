@@ -37,6 +37,8 @@ dependencies = [
     "tree-sitter-java>=0.21.0",
     "tree-sitter-kotlin>=0.3.0",
     "networkx>=3.0",
+    "rich>=13.0.0",
+    "questionary>=2.0.0",
 ]
 
 [project.urls]
