@@ -5,7 +5,7 @@ import sys
 import json
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, List, Tuple
 
 from rich.console import Console
 from rich.table import Table
@@ -15,12 +15,97 @@ from rich import box
 console = Console()
 
 
+def parse_repo_id(repo_id: str) -> Tuple[str, str]:
+    """Parse repo_id into (group, project) tuple."""
+    clean_id = repo_id.strip("/")
+    parts = clean_id.split("/")
+    if len(parts) >= 2:
+        project = parts[-1]
+        group = "/".join(parts[:-1])
+        return (group, project)
+    return (clean_id, "")
+
+
+async def get_or_analyze_repo(repo_id: str, force_refresh: bool = False):
+    """Get stored analysis for a repo, or analyze and store it."""
+    from ..config import Config
+    from ..core import GitLabContext
+    from ..analysis import CodeAnalyzer, Symbol, SymbolType
+    from ..providers import ProviderFactory
+
+    config = Config.load()
+    context = GitLabContext(config)
+    await context.init()
+
+    group, project = parse_repo_id(repo_id)
+    lib = await context.storage.get_library(group, project)
+
+    if not lib:
+        return None, None, f"Repository {repo_id} not found in index. Use 'repo-ctx repo index {repo_id}' first."
+
+    # Check if we have stored symbols
+    stored_symbols = await context.storage.search_symbols(lib.id, "")
+
+    if stored_symbols and not force_refresh:
+        # Return stored symbols
+        symbols = []
+        for s in stored_symbols:
+            symbols.append(Symbol(
+                name=s['name'],
+                symbol_type=SymbolType(s['symbol_type']),
+                file_path=s['file_path'],
+                line_start=s['line_start'],
+                line_end=s['line_end'],
+                signature=s.get('signature'),
+                visibility=s.get('visibility', 'public'),
+                language=s.get('language', 'unknown'),
+                qualified_name=s.get('qualified_name'),
+                documentation=s.get('documentation'),
+                is_exported=s.get('is_exported', True),
+                metadata={}
+            ))
+        return symbols, lib, None
+
+    # Need to fetch and analyze
+    try:
+        provider = ProviderFactory.from_config(config, lib.provider)
+        project_path = f"{group}/{project}"
+        project_info = await provider.get_project(project_path)
+        ref = await provider.get_default_branch(project_info)
+        file_paths = await provider.get_file_tree(project_info, ref)
+
+        analyzer = CodeAnalyzer()
+        files = {}
+        for file_path in file_paths:
+            if analyzer.detect_language(file_path):
+                try:
+                    file_content = await provider.read_file(project_info, file_path, ref)
+                    files[file_path] = file_content.content
+                except Exception:
+                    continue
+
+        if not files:
+            return [], lib, None
+
+        # Analyze
+        results = analyzer.analyze_files(files)
+        symbols = analyzer.aggregate_symbols(results)
+
+        # Store symbols in database
+        await context.storage.save_symbols(symbols, lib.id)
+
+        return symbols, lib, None
+
+    except Exception as e:
+        return None, lib, str(e)
+
+
 def run_command(args):
     """Route and execute the appropriate command."""
     if args.command == "repo":
         asyncio.run(handle_repo_command(args))
     elif args.command == "code":
-        handle_code_command(args)
+        asyncio.run(handle_code_command(args))
     elif args.command == "config":
         asyncio.run(handle_config_command(args))
     else:
@@ -276,61 +361,89 @@ async def repo_docs(args):
 # CODE COMMANDS
 # ============================================================================
 
-def handle_code_command(args):
+async def handle_code_command(args):
     """Handle code subcommands."""
     if not args.code_command:
         console.print("[yellow]Usage: repo-ctx code <analyze|find|info|symbols>[/yellow]")
         return
 
     if args.code_command == "analyze":
-        code_analyze(args)
+        await code_analyze(args)
     elif args.code_command == "find":
-        code_find(args)
+        await code_find(args)
     elif args.code_command == "info":
-        code_info(args)
+        await code_info(args)
     elif args.code_command == "symbols":
         code_symbols(args)
 
 
-def code_analyze(args):
+async def code_analyze(args):
     """Analyze code structure."""
     from ..analysis import CodeAnalyzer, SymbolType
 
     try:
         analyzer = CodeAnalyzer()
-        path_obj = Path(args.path)
-
-        if not path_obj.exists():
-            console.print(f"[red]Error: Path '{args.path}' does not exist[/red]")
-            sys.exit(1)
-
-        # Collect files
+        all_symbols = []
         files = {}
-        if path_obj.is_file():
-            if analyzer.detect_language(str(path_obj)):
-                with open(path_obj, 'r', encoding='utf-8') as f:
-                    files[str(path_obj)] = f.read()
+        source_info = args.path
+
+        # Check if using indexed repo
+        if getattr(args, 'repo', False):
+            # Use indexed repository
+            force_refresh = getattr(args, 'refresh', False)
+            symbols, lib, error = await get_or_analyze_repo(args.path, force_refresh=force_refresh)
+
+            if error:
+                if args.output == "json":
+                    print(json.dumps({"status": "error", "message": error}))
+                else:
+                    console.print(f"[red]Error: {error}[/red]")
+                sys.exit(1)
+
+            if not symbols:
+                if args.output == "json":
+                    print(json.dumps({"path": args.path, "symbols": [], "statistics": {}}))
+                else:
+                    console.print(f"[yellow]No symbols found in '{args.path}'[/yellow]")
+                return
+
+            all_symbols = symbols
+            source_info = f"{args.path} (indexed)"
+
         else:
-            for root, _, filenames in os.walk(path_obj):
-                for filename in filenames:
-                    file_path = os.path.join(root, filename)
-                    lang = analyzer.detect_language(filename)
-                    if lang:
-                        if args.lang and lang != args.lang:
-                            continue
-                        try:
-                            with open(file_path, 'r', encoding='utf-8') as f:
-                                files[file_path] = f.read()
-                        except (UnicodeDecodeError, PermissionError):
-                            continue
+            # Use local path
+            path_obj = Path(args.path)
 
-        if not files:
-            console.print(f"[yellow]No supported files found in '{args.path}'[/yellow]")
-            return
+            if not path_obj.exists():
+                console.print(f"[red]Error: Path '{args.path}' does not exist[/red]")
+                sys.exit(1)
 
-        # Analyze
-        results = analyzer.analyze_files(files)
-        all_symbols = analyzer.aggregate_symbols(results)
+            # Collect files
+            if path_obj.is_file():
+                if analyzer.detect_language(str(path_obj)):
+                    with open(path_obj, 'r', encoding='utf-8') as f:
+                        files[str(path_obj)] = f.read()
+            else:
+                for root, _, filenames in os.walk(path_obj):
+                    for filename in filenames:
+                        file_path = os.path.join(root, filename)
+                        lang = analyzer.detect_language(filename)
+                        if lang:
+                            if args.lang and lang != args.lang:
+                                continue
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    files[file_path] = f.read()
+                            except (UnicodeDecodeError, PermissionError):
+                                continue
+
+            if not files:
+                console.print(f"[yellow]No supported files found in '{args.path}'[/yellow]")
+                return
+
+            # Analyze
+            results = analyzer.analyze_files(files)
+            all_symbols = analyzer.aggregate_symbols(results)
 
         # Filter by type
         if args.type:
@@ -342,7 +455,7 @@ def code_analyze(args):
         if args.output == "json":
             output = {
                 "path": args.path,
-                "files_analyzed": len(files),
+                "files_analyzed": len(files) if files else "stored",
                 "statistics": stats,
                 "symbols": [
                     {
@@ -362,7 +475,6 @@ def code_analyze(args):
             import yaml
             output = {
                 "path": args.path,
-                "files_analyzed": len(files),
                 "statistics": stats,
                 "symbols": [
                     {"name": s.name, "type": s.symbol_type.value, "file": s.file_path}
@@ -371,8 +483,9 @@ def code_analyze(args):
             }
             print(yaml.dump(output, default_flow_style=False))
         else:
-            console.print(f"[bold]Analysis: {args.path}[/bold]\n")
-            console.print(f"Files analyzed: {len(files)}")
+            console.print(f"[bold]Analysis: {source_info}[/bold]\n")
+            if files:
+                console.print(f"Files analyzed: {len(files)}")
             console.print(f"Total symbols: {stats['total_symbols']}\n")
 
             if stats['by_type']:
@@ -383,8 +496,8 @@ def code_analyze(args):
                     table.add_row(stype, str(count))
                 console.print(table)
 
-            # Show dependencies if requested
-            if args.deps:
+            # Show dependencies if requested (only for local)
+            if args.deps and files:
                 console.print("\n[bold]Dependencies:[/bold]")
                 for file_path, code in files.items():
                     deps = analyzer.extract_dependencies(code, file_path)
@@ -401,46 +514,73 @@ def code_analyze(args):
         sys.exit(1)
 
 
-def code_find(args):
+async def code_find(args):
     """Find symbols by pattern."""
     from ..analysis import CodeAnalyzer, SymbolType
 
     try:
         analyzer = CodeAnalyzer()
-        path_obj = Path(args.path)
+        all_symbols = []
+        source_info = args.path
 
-        if not path_obj.exists():
-            console.print(f"[red]Error: Path '{args.path}' does not exist[/red]")
-            sys.exit(1)
+        # Check if using indexed repo
+        if getattr(args, 'repo', False):
+            symbols, lib, error = await get_or_analyze_repo(args.path)
 
-        # Collect files
-        files = {}
-        if path_obj.is_file():
-            if analyzer.detect_language(str(path_obj)):
-                with open(path_obj, 'r', encoding='utf-8') as f:
-                    files[str(path_obj)] = f.read()
+            if error:
+                if args.output == "json":
+                    print(json.dumps({"status": "error", "message": error}))
+                else:
+                    console.print(f"[red]Error: {error}[/red]")
+                sys.exit(1)
+
+            if not symbols:
+                if args.output == "json":
+                    print(json.dumps({"query": args.query, "count": 0, "symbols": []}))
+                else:
+                    console.print(f"[yellow]No symbols found in '{args.path}'[/yellow]")
+                return
+
+            all_symbols = symbols
+            source_info = f"{args.path} (indexed)"
+
         else:
-            for root, _, filenames in os.walk(path_obj):
-                for filename in filenames:
-                    file_path = os.path.join(root, filename)
-                    lang = analyzer.detect_language(filename)
-                    if lang:
-                        if args.lang and lang != args.lang:
-                            continue
-                        try:
-                            with open(file_path, 'r', encoding='utf-8') as f:
-                                files[file_path] = f.read()
-                        except (UnicodeDecodeError, PermissionError):
-                            continue
+            # Use local path
+            path_obj = Path(args.path)
 
-        if not files:
-            console.print(f"[yellow]No supported files found[/yellow]")
-            return
+            if not path_obj.exists():
+                console.print(f"[red]Error: Path '{args.path}' does not exist[/red]")
+                sys.exit(1)
 
-        # Analyze and search
-        results = analyzer.analyze_files(files)
-        all_symbols = analyzer.aggregate_symbols(results)
+            # Collect files
+            files = {}
+            if path_obj.is_file():
+                if analyzer.detect_language(str(path_obj)):
+                    with open(path_obj, 'r', encoding='utf-8') as f:
+                        files[str(path_obj)] = f.read()
+            else:
+                for root, _, filenames in os.walk(path_obj):
+                    for filename in filenames:
+                        file_path = os.path.join(root, filename)
+                        lang = analyzer.detect_language(filename)
+                        if lang:
+                            if args.lang and lang != args.lang:
+                                continue
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    files[file_path] = f.read()
+                            except (UnicodeDecodeError, PermissionError):
+                                continue
 
+            if not files:
+                console.print(f"[yellow]No supported files found[/yellow]")
+                return
+
+            # Analyze and search
+            results = analyzer.analyze_files(files)
+            all_symbols = analyzer.aggregate_symbols(results)
+
+        # Filter by query
         query_lower = args.query.lower()
         matching = [s for s in all_symbols if query_lower in s.name.lower()]
 
@@ -498,42 +638,66 @@ def code_find(args):
         sys.exit(1)
 
 
-def code_info(args):
+async def code_info(args):
     """Get symbol details."""
     from ..analysis import CodeAnalyzer
 
     try:
         analyzer = CodeAnalyzer()
-        path_obj = Path(args.path)
+        all_symbols = []
 
-        if not path_obj.exists():
-            console.print(f"[red]Error: Path '{args.path}' does not exist[/red]")
-            sys.exit(1)
+        # Check if using indexed repo
+        if getattr(args, 'repo', False):
+            symbols, lib, error = await get_or_analyze_repo(args.path)
 
-        # Collect files
-        files = {}
-        if path_obj.is_file():
-            if analyzer.detect_language(str(path_obj)):
-                with open(path_obj, 'r', encoding='utf-8') as f:
-                    files[str(path_obj)] = f.read()
+            if error:
+                if args.output == "json":
+                    print(json.dumps({"status": "error", "message": error}))
+                else:
+                    console.print(f"[red]Error: {error}[/red]")
+                sys.exit(1)
+
+            if not symbols:
+                if args.output == "json":
+                    print(json.dumps({"status": "error", "message": f"No symbols found in '{args.path}'"}))
+                else:
+                    console.print(f"[yellow]No symbols found in '{args.path}'[/yellow]")
+                return
+
+            all_symbols = symbols
+
         else:
-            for root, _, filenames in os.walk(path_obj):
-                for filename in filenames:
-                    file_path = os.path.join(root, filename)
-                    if analyzer.detect_language(filename):
-                        try:
-                            with open(file_path, 'r', encoding='utf-8') as f:
-                                files[file_path] = f.read()
-                        except (UnicodeDecodeError, PermissionError):
-                            continue
+            # Use local path
+            path_obj = Path(args.path)
 
-        if not files:
-            console.print(f"[yellow]No supported files found[/yellow]")
-            return
+            if not path_obj.exists():
+                console.print(f"[red]Error: Path '{args.path}' does not exist[/red]")
+                sys.exit(1)
 
-        # Analyze and find
-        results = analyzer.analyze_files(files)
-        all_symbols = analyzer.aggregate_symbols(results)
+            # Collect files
+            files = {}
+            if path_obj.is_file():
+                if analyzer.detect_language(str(path_obj)):
+                    with open(path_obj, 'r', encoding='utf-8') as f:
+                        files[str(path_obj)] = f.read()
+            else:
+                for root, _, filenames in os.walk(path_obj):
+                    for filename in filenames:
+                        file_path = os.path.join(root, filename)
+                        if analyzer.detect_language(filename):
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    files[file_path] = f.read()
+                            except (UnicodeDecodeError, PermissionError):
+                                continue
+
+            if not files:
+                console.print(f"[yellow]No supported files found[/yellow]")
+                return
+
+            # Analyze and find
+            results = analyzer.analyze_files(files)
+            all_symbols = analyzer.aggregate_symbols(results)
 
         matching = [s for s in all_symbols if s.name == args.name or s.qualified_name == args.name]
 

@@ -34,25 +34,105 @@ async def get_indexed_repos() -> List[str]:
         return []
 
 
-async def check_repo_indexed(repo_id: str) -> bool:
-    """Check if a repository is indexed."""
+def parse_repo_id(repo_id: str) -> tuple:
+    """Parse repo_id into (group, project) tuple."""
+    # Remove leading slash if present
+    clean_id = repo_id.strip("/")
+    parts = clean_id.split("/")
+    if len(parts) >= 2:
+        project = parts[-1]
+        group = "/".join(parts[:-1])
+        return (group, project)
+    return (clean_id, "")
+
+
+async def get_library_info(repo_id: str):
+    """Get library info for a repo_id."""
+    from ..config import Config
+    from ..core import GitLabContext
+
+    config = Config.load()
+    context = GitLabContext(config)
+    await context.init()
+
+    group, project = parse_repo_id(repo_id)
+    lib = await context.storage.get_library(group, project)
+    return lib, context, config
+
+
+async def get_or_analyze_repo(repo_id: str, force_refresh: bool = False):
+    """Get stored analysis for a repo, or analyze and store it."""
+    from ..config import Config
+    from ..core import GitLabContext
+    from ..analysis import CodeAnalyzer
+    from ..providers import ProviderFactory
+
+    config = Config.load()
+    context = GitLabContext(config)
+    await context.init()
+
+    group, project = parse_repo_id(repo_id)
+    lib = await context.storage.get_library(group, project)
+
+    if not lib:
+        return None, None, f"Repository {repo_id} not found in index"
+
+    # Check if we have stored symbols
+    stored_symbols = await context.storage.search_symbols(lib.id, "")
+
+    if stored_symbols and not force_refresh:
+        # Return stored symbols
+        from ..analysis import Symbol, SymbolType
+        symbols = []
+        for s in stored_symbols:
+            symbols.append(Symbol(
+                name=s['name'],
+                symbol_type=SymbolType(s['symbol_type']),
+                file_path=s['file_path'],
+                line_start=s['line_start'],
+                line_end=s['line_end'],
+                signature=s.get('signature'),
+                visibility=s.get('visibility', 'public'),
+                language=s.get('language', 'unknown'),
+                qualified_name=s.get('qualified_name'),
+                documentation=s.get('documentation'),
+                is_exported=s.get('is_exported', True),
+                metadata={}
+            ))
+        return symbols, lib, None
+
+    # Need to fetch and analyze
     try:
-        from ..config import Config
-        from ..core import GitLabContext
+        provider = ProviderFactory.from_config(config, lib.provider)
+        project_path = f"{group}/{project}"
+        project_info = await provider.get_project(project_path)
+        ref = await provider.get_default_branch(project_info)
+        file_paths = await provider.get_file_tree(project_info, ref)
 
-        config = Config.load()
-        context = GitLabContext(config)
-        await context.init()
+        analyzer = CodeAnalyzer()
+        files = {}
+        for file_path in file_paths:
+            if analyzer.detect_language(file_path):
+                try:
+                    file_content = await provider.read_file(project_info, file_path, ref)
+                    files[file_path] = file_content.content
+                except Exception:
+                    continue
 
-        # Normalize repo_id
-        if not repo_id.startswith("/"):
-            repo_id = f"/{repo_id}"
+        if not files:
+            return [], lib, None
 
-        libraries = await context.list_all_libraries()
-        indexed_ids = [f"/{lib.group_name}/{lib.project_name}" for lib in libraries]
-        return repo_id in indexed_ids
-    except Exception:
-        return False
+        # Analyze
+        results = analyzer.analyze_files(files)
+        symbols = analyzer.aggregate_symbols(results)
+
+        # Store symbols in database
+        await context.storage.save_symbols(symbols, lib.id)
+
+        return symbols, lib, None
+
+    except Exception as e:
+        return None, lib, str(e)
 
 
 def is_local_path(path: str) -> bool:
@@ -386,52 +466,36 @@ async def execute_code_analyze():
             return
 
         source_name = repo_id
-        console.print(f"\n[cyan]Fetching code from {repo_id}...[/cyan]")
+        console.print(f"\n[cyan]Analyzing {repo_id} (fetching if needed)...[/cyan]")
 
-        try:
-            from ..config import Config
-            from ..core import GitLabContext
-            from ..analysis import CodeAnalyzer
+        symbols, lib, error = await get_or_analyze_repo(repo_id)
 
-            config = Config.load()
-            context = GitLabContext(config)
-            await context.init()
-
-            # Get the library to find provider info
-            lib = await context.storage.get_library(repo_id)
-            if not lib:
-                console.print(f"[red]Error: Repository {repo_id} not found in index[/red]")
-                return
-
-            # Fetch files from provider
-            from ..providers import ProviderFactory
-            provider = ProviderFactory.from_config(config, lib.provider)
-
-            # Get project path from repo_id
-            parts = repo_id.strip("/").split("/")
-            if len(parts) >= 2:
-                project_path = "/".join(parts)
-            else:
-                project_path = repo_id.strip("/")
-
-            project_info = await provider.get_project(project_path)
-            ref = await provider.get_default_branch(project_info)
-            file_paths = await provider.get_file_tree(project_info, ref)
-
-            analyzer = CodeAnalyzer()
-            for file_path in file_paths:
-                if analyzer.detect_language(file_path):
-                    try:
-                        file_content = await provider.read_file(project_info, file_path, ref)
-                        files[file_path] = file_content.content
-                    except Exception:
-                        continue
-
-            console.print(f"[green]Fetched {len(files)} source files[/green]\n")
-
-        except Exception as e:
-            console.print(f"[red]Error fetching repository: {e}[/red]")
+        if error:
+            console.print(f"[red]Error: {error}[/red]")
             return
+
+        if not symbols:
+            console.print(f"[yellow]No symbols found in {repo_id}[/yellow]")
+            return
+
+        # Get statistics
+        from ..analysis import CodeAnalyzer
+        analyzer = CodeAnalyzer()
+        stats = analyzer.get_statistics(symbols)
+
+        console.print(f"\n[bold]Analysis: {source_name}[/bold]\n")
+        console.print(f"[green]Total symbols:[/green] {stats['total_symbols']}")
+        console.print()
+
+        if stats['by_type']:
+            table = Table(title="Symbols by Type", box=box.SIMPLE)
+            table.add_column("Type", style="cyan")
+            table.add_column("Count", style="white")
+            for stype, count in stats['by_type'].items():
+                table.add_row(stype, str(count))
+            console.print(table)
+
+        return  # Done for indexed repos
 
     else:  # local
         path = await questionary.text(
@@ -548,7 +612,6 @@ async def execute_code_find():
 
         source_name = repo_id
 
-        # Get search query before fetching
         query = await questionary.text(
             "Symbol name or pattern:",
             style=custom_style
@@ -558,41 +621,48 @@ async def execute_code_find():
             console.print("[yellow]Cancelled[/yellow]")
             return
 
-        console.print(f"\n[cyan]Fetching code from {repo_id}...[/cyan]")
+        console.print(f"\n[cyan]Searching in {repo_id}...[/cyan]")
 
-        try:
-            from ..config import Config
-            from ..core import GitLabContext
-            from ..analysis import CodeAnalyzer
-            from ..providers import ProviderFactory
+        symbols, lib, error = await get_or_analyze_repo(repo_id)
 
-            config = Config.load()
-            context = GitLabContext(config)
-            await context.init()
-
-            lib = await context.storage.get_library(repo_id)
-            if not lib:
-                console.print(f"[red]Error: Repository {repo_id} not found in index[/red]")
-                return
-
-            provider = ProviderFactory.from_config(config, lib.provider)
-            project_path = repo_id.strip("/")
-            project_info = await provider.get_project(project_path)
-            ref = await provider.get_default_branch(project_info)
-            file_paths = await provider.get_file_tree(project_info, ref)
-
-            analyzer = CodeAnalyzer()
-            for file_path in file_paths:
-                if analyzer.detect_language(file_path):
-                    try:
-                        file_content = await provider.read_file(project_info, file_path, ref)
-                        files[file_path] = file_content.content
-                    except Exception:
-                        continue
-
-        except Exception as e:
-            console.print(f"[red]Error fetching repository: {e}[/red]")
+        if error:
+            console.print(f"[red]Error: {error}[/red]")
             return
+
+        if not symbols:
+            console.print(f"[yellow]No symbols in {repo_id}[/yellow]")
+            return
+
+        # Search
+        query_lower = query.lower()
+        matching = [s for s in symbols if query_lower in s.name.lower()]
+
+        if not matching:
+            console.print(f"[yellow]No symbols found matching '{query}'[/yellow]")
+            return
+
+        console.print(f"[green]Found {len(matching)} matching symbol(s) in {source_name}[/green]\n")
+
+        table = Table(box=box.ROUNDED, show_header=True)
+        table.add_column("Symbol", style="green")
+        table.add_column("Type", style="cyan")
+        table.add_column("File", style="dim")
+        table.add_column("Line", style="dim")
+
+        for symbol in matching[:20]:
+            table.add_row(
+                symbol.name,
+                symbol.symbol_type.value,
+                symbol.file_path.split("/")[-1],
+                str(symbol.line_start or "-")
+            )
+
+        console.print(table)
+
+        if len(matching) > 20:
+            console.print(f"[dim]... and {len(matching) - 20} more[/dim]")
+
+        return  # Done for indexed repos
 
     else:  # local
         path = await questionary.text(
@@ -647,50 +717,50 @@ async def execute_code_find():
             console.print(f"[red]Error: {e}[/red]")
             return
 
-    if not files:
-        console.print(f"[yellow]No supported source files found[/yellow]")
-        return
-
-    # Analyze and search
-    try:
-        from ..analysis import CodeAnalyzer
-        analyzer = CodeAnalyzer()
-
-        console.print(f"[cyan]Searching for '{query}'...[/cyan]\n")
-
-        results = analyzer.analyze_files(files)
-        all_symbols = analyzer.aggregate_symbols(results)
-
-        query_lower = query.lower()
-        matching = [s for s in all_symbols if query_lower in s.name.lower()]
-
-        if not matching:
-            console.print(f"[yellow]No symbols found matching '{query}'[/yellow]")
+        if not files:
+            console.print(f"[yellow]No supported source files found[/yellow]")
             return
 
-        console.print(f"[green]Found {len(matching)} matching symbol(s) in {source_name}[/green]\n")
+        # Analyze and search
+        try:
+            from ..analysis import CodeAnalyzer
+            analyzer = CodeAnalyzer()
 
-        table = Table(box=box.ROUNDED, show_header=True)
-        table.add_column("Symbol", style="green")
-        table.add_column("Type", style="cyan")
-        table.add_column("File", style="dim")
-        table.add_column("Line", style="dim")
+            console.print(f"[cyan]Searching for '{query}'...[/cyan]\n")
 
-        for symbol in matching[:20]:
-            table.add_row(
-                symbol.name,
-                symbol.symbol_type.value,
-                symbol.file_path.split("/")[-1],
-                str(symbol.line_start or "-")
-            )
+            results = analyzer.analyze_files(files)
+            all_symbols = analyzer.aggregate_symbols(results)
 
-        console.print(table)
+            query_lower = query.lower()
+            matching = [s for s in all_symbols if query_lower in s.name.lower()]
 
-        if len(matching) > 20:
-            console.print(f"[dim]... and {len(matching) - 20} more[/dim]")
+            if not matching:
+                console.print(f"[yellow]No symbols found matching '{query}'[/yellow]")
+                return
 
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+            console.print(f"[green]Found {len(matching)} matching symbol(s) in {source_name}[/green]\n")
+
+            table = Table(box=box.ROUNDED, show_header=True)
+            table.add_column("Symbol", style="green")
+            table.add_column("Type", style="cyan")
+            table.add_column("File", style="dim")
+            table.add_column("Line", style="dim")
+
+            for symbol in matching[:20]:
+                table.add_row(
+                    symbol.name,
+                    symbol.symbol_type.value,
+                    symbol.file_path.split("/")[-1],
+                    str(symbol.line_start or "-")
+                )
+
+            console.print(table)
+
+            if len(matching) > 20:
+                console.print(f"[dim]... and {len(matching) - 20} more[/dim]")
+
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
 
 
 async def execute_code_info():
@@ -737,41 +807,41 @@ async def execute_code_info():
             console.print("[yellow]Cancelled[/yellow]")
             return
 
-        console.print(f"\n[cyan]Fetching code from {repo_id}...[/cyan]")
+        console.print(f"\n[cyan]Looking up '{name}' in {repo_id}...[/cyan]")
 
-        try:
-            from ..config import Config
-            from ..core import GitLabContext
-            from ..analysis import CodeAnalyzer
-            from ..providers import ProviderFactory
+        symbols, lib, error = await get_or_analyze_repo(repo_id)
 
-            config = Config.load()
-            context = GitLabContext(config)
-            await context.init()
-
-            lib = await context.storage.get_library(repo_id)
-            if not lib:
-                console.print(f"[red]Error: Repository {repo_id} not found in index[/red]")
-                return
-
-            provider = ProviderFactory.from_config(config, lib.provider)
-            project_path = repo_id.strip("/")
-            project_info = await provider.get_project(project_path)
-            ref = await provider.get_default_branch(project_info)
-            file_paths = await provider.get_file_tree(project_info, ref)
-
-            analyzer = CodeAnalyzer()
-            for file_path in file_paths:
-                if analyzer.detect_language(file_path):
-                    try:
-                        file_content = await provider.read_file(project_info, file_path, ref)
-                        files[file_path] = file_content.content
-                    except Exception:
-                        continue
-
-        except Exception as e:
-            console.print(f"[red]Error fetching repository: {e}[/red]")
+        if error:
+            console.print(f"[red]Error: {error}[/red]")
             return
+
+        if not symbols:
+            console.print(f"[yellow]No symbols in {repo_id}[/yellow]")
+            return
+
+        # Find exact match
+        matching = [s for s in symbols if s.name == name or s.qualified_name == name]
+
+        if not matching:
+            console.print(f"[yellow]Symbol '{name}' not found[/yellow]")
+            return
+
+        symbol = matching[0]
+
+        console.print(Panel(
+            f"[bold]{symbol.name}[/bold] ({symbol.symbol_type.value})\n\n"
+            f"[cyan]File:[/cyan] {symbol.file_path}\n"
+            f"[cyan]Line:[/cyan] {symbol.line_start or '-'}"
+            + (f" - {symbol.line_end}" if symbol.line_end else "") + "\n"
+            f"[cyan]Visibility:[/cyan] {symbol.visibility}\n"
+            f"[cyan]Language:[/cyan] {symbol.language}\n"
+            + (f"\n[cyan]Signature:[/cyan]\n{symbol.signature}" if symbol.signature else "")
+            + (f"\n\n[cyan]Documentation:[/cyan]\n{symbol.documentation}" if symbol.documentation else ""),
+            title="Symbol Details",
+            border_style="green"
+        ))
+
+        return  # Done for indexed repos
 
     else:  # local
         path = await questionary.text(
@@ -806,6 +876,7 @@ async def execute_code_info():
                 console.print(f"[red]Error: Path '{path}' does not exist[/red]")
                 return
 
+            files = {}
             if path_obj.is_file():
                 if analyzer.detect_language(str(path_obj)):
                     with open(path_obj, 'r', encoding='utf-8') as f:
@@ -821,47 +892,36 @@ async def execute_code_info():
                             except (UnicodeDecodeError, PermissionError):
                                 continue
 
+            if not files:
+                console.print(f"[yellow]No supported source files found[/yellow]")
+                return
+
+            results = analyzer.analyze_files(files)
+            all_symbols = analyzer.aggregate_symbols(results)
+
+            matching = [s for s in all_symbols if s.name == name or s.qualified_name == name]
+
+            if not matching:
+                console.print(f"[yellow]Symbol '{name}' not found[/yellow]")
+                return
+
+            symbol = matching[0]
+
+            console.print(Panel(
+                f"[bold]{symbol.name}[/bold] ({symbol.symbol_type.value})\n\n"
+                f"[cyan]File:[/cyan] {symbol.file_path}\n"
+                f"[cyan]Line:[/cyan] {symbol.line_start or '-'}"
+                + (f" - {symbol.line_end}" if symbol.line_end else "") + "\n"
+                f"[cyan]Visibility:[/cyan] {symbol.visibility}\n"
+                f"[cyan]Language:[/cyan] {symbol.language}\n"
+                + (f"\n[cyan]Signature:[/cyan]\n{symbol.signature}" if symbol.signature else "")
+                + (f"\n\n[cyan]Documentation:[/cyan]\n{symbol.documentation}" if symbol.documentation else ""),
+                title="Symbol Details",
+                border_style="green"
+            ))
+
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
-            return
-
-    if not files:
-        console.print(f"[yellow]No supported source files found[/yellow]")
-        return
-
-    # Analyze and find symbol
-    try:
-        from ..analysis import CodeAnalyzer
-        analyzer = CodeAnalyzer()
-
-        console.print(f"[cyan]Looking up '{name}'...[/cyan]\n")
-
-        results = analyzer.analyze_files(files)
-        all_symbols = analyzer.aggregate_symbols(results)
-
-        matching = [s for s in all_symbols if s.name == name or s.qualified_name == name]
-
-        if not matching:
-            console.print(f"[yellow]Symbol '{name}' not found[/yellow]")
-            return
-
-        symbol = matching[0]
-
-        console.print(Panel(
-            f"[bold]{symbol.name}[/bold] ({symbol.symbol_type.value})\n\n"
-            f"[cyan]File:[/cyan] {symbol.file_path}\n"
-            f"[cyan]Line:[/cyan] {symbol.line_start or '-'}"
-            + (f" - {symbol.line_end}" if symbol.line_end else "") + "\n"
-            f"[cyan]Visibility:[/cyan] {symbol.visibility}\n"
-            f"[cyan]Language:[/cyan] {symbol.language}\n"
-            + (f"\n[cyan]Signature:[/cyan]\n{symbol.signature}" if symbol.signature else "")
-            + (f"\n\n[cyan]Documentation:[/cyan]\n{symbol.documentation}" if symbol.documentation else ""),
-            title="Symbol Details",
-            border_style="green"
-        ))
-
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
 
 
 async def execute_code_symbols():
@@ -913,13 +973,14 @@ async def execute_code_symbols():
             context = GitLabContext(config)
             await context.init()
 
-            lib = await context.storage.get_library(repo_id)
+            group, project = parse_repo_id(repo_id)
+            lib = await context.storage.get_library(group, project)
             if not lib:
                 console.print(f"[red]Error: Repository {repo_id} not found in index[/red]")
                 return
 
             provider = ProviderFactory.from_config(config, lib.provider)
-            project_path = repo_id.strip("/")
+            project_path = f"{group}/{project}"
             project_info = await provider.get_project(project_path)
             ref = await provider.get_default_branch(project_info)
             all_files = await provider.get_file_tree(project_info, ref)

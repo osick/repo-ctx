@@ -1,5 +1,6 @@
 """Tests for CLI commands."""
 import pytest
+import asyncio
 import os
 import tempfile
 import json
@@ -89,10 +90,11 @@ class ProductService:
             query="Service",
             output="text",
             type=None,
-            lang=None
+            lang=None,
+            repo=False
         )
         # The command prints to stdout, so we just verify it doesn't crash
-        code_find(args)
+        asyncio.run(code_find(args))
 
     def test_search_symbol_with_filter(self, tmp_path):
         """Test code find with type filter."""
@@ -114,9 +116,10 @@ def my_function():
             query="my",
             output="text",
             type="class",
-            lang=None
+            lang=None,
+            repo=False
         )
-        code_find(args)
+        asyncio.run(code_find(args))
 
     def test_search_symbol_json_output(self, tmp_path, capsys):
         """Test code find with JSON output."""
@@ -134,9 +137,10 @@ class TestClass:
             query="Test",
             output="json",
             type=None,
-            lang=None
+            lang=None,
+            repo=False
         )
-        code_find(args)
+        asyncio.run(code_find(args))
 
         captured = capsys.readouterr()
         # Should be valid JSON
@@ -167,9 +171,10 @@ class UserManager:
         args = Namespace(
             path=str(tmp_path),
             name="UserManager",
-            output="text"
+            output="text",
+            repo=False
         )
-        code_info(args)
+        asyncio.run(code_info(args))
 
         captured = capsys.readouterr()
         assert "UserManager" in captured.out
@@ -189,9 +194,10 @@ class SomeClass:
         args = Namespace(
             path=str(tmp_path),
             name="NonExistent",
-            output="text"
+            output="text",
+            repo=False
         )
-        code_info(args)
+        asyncio.run(code_info(args))
 
         captured = capsys.readouterr()
         assert "not found" in captured.out
@@ -211,9 +217,10 @@ def my_function():
         args = Namespace(
             path=str(tmp_path),
             name="my_function",
-            output="json"
+            output="json",
+            repo=False
         )
-        code_info(args)
+        asyncio.run(code_info(args))
 
         captured = capsys.readouterr()
         data = json.loads(captured.out)
@@ -340,9 +347,11 @@ class MyClass:
             deps=True,
             callgraph=False,
             type=None,
-            lang=None
+            lang=None,
+            repo=False,
+            refresh=False
         )
-        code_analyze(args)
+        asyncio.run(code_analyze(args))
 
         captured = capsys.readouterr()
         assert "Dependencies" in captured.out
@@ -374,9 +383,11 @@ class Calculator:
             deps=False,
             callgraph=False,
             type=None,
-            lang=None
+            lang=None,
+            repo=False,
+            refresh=False
         )
-        code_analyze(args)
+        asyncio.run(code_analyze(args))
 
         captured = capsys.readouterr()
         assert "Calculator" in captured.out or "class" in captured.out

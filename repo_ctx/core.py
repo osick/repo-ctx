@@ -400,7 +400,8 @@ class RepositoryContext:
             group_name=group,
             project_name=project,
             description=description or "",
-            default_version=default_branch
+            default_version=default_branch,
+            provider=provider_type or "github"
         )
         db_library_id = await self.storage.save_library(library)
 

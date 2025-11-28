@@ -1,10 +1,94 @@
 """MCP server implementation."""
 import json
+from typing import Tuple, Optional, List
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 from .core import GitLabContext
 from .config import Config
+
+
+def parse_repo_id(repo_id: str) -> Tuple[str, str]:
+    """Parse repo_id into (group, project) tuple."""
+    clean_id = repo_id.strip("/")
+    parts = clean_id.split("/")
+    if len(parts) >= 2:
+        project = parts[-1]
+        group = "/".join(parts[:-1])
+        return (group, project)
+    return (clean_id, "")
+
+
+async def get_or_analyze_repo(context: GitLabContext, repo_id: str, force_refresh: bool = False):
+    """Get stored analysis for a repo, or analyze and store it.
+
+    Returns: (symbols, lib, error_message)
+    """
+    from .analysis import CodeAnalyzer, Symbol, SymbolType
+    from .providers import ProviderFactory
+
+    group, project = parse_repo_id(repo_id)
+    lib = await context.storage.get_library(group, project)
+
+    if not lib:
+        return None, None, f"Repository {repo_id} not found in index. Use repo-ctx-index first."
+
+    # Check if we have stored symbols
+    stored_symbols = await context.storage.search_symbols(lib.id, "")
+
+    if stored_symbols and not force_refresh:
+        # Return stored symbols
+        symbols = []
+        for s in stored_symbols:
+            symbols.append(Symbol(
+                name=s['name'],
+                symbol_type=SymbolType(s['symbol_type']),
+                file_path=s['file_path'],
+                line_start=s['line_start'],
+                line_end=s['line_end'],
+                signature=s.get('signature'),
+                visibility=s.get('visibility', 'public'),
+                language=s.get('language', 'unknown'),
+                qualified_name=s.get('qualified_name'),
+                documentation=s.get('documentation'),
+                is_exported=s.get('is_exported', True),
+                metadata={}
+            ))
+        return symbols, lib, None
+
+    # Need to fetch and analyze
+    try:
+        config = context.config
+        provider = ProviderFactory.from_config(config, lib.provider)
+        project_path = f"{group}/{project}"
+        project_info = await provider.get_project(project_path)
+        ref = await provider.get_default_branch(project_info)
+        file_paths = await provider.get_file_tree(project_info, ref)
+
+        analyzer = CodeAnalyzer()
+        files = {}
+        for file_path in file_paths:
+            if analyzer.detect_language(file_path):
+                try:
+                    file_content = await provider.read_file(project_info, file_path, ref)
+                    files[file_path] = file_content.content
+                except Exception:
+                    continue
+
+        if not files:
+            return [], lib, None
+
+        # Analyze
+        results = analyzer.analyze_files(files)
+        symbols = analyzer.aggregate_symbols(results)
+
+        # Store symbols in database
+        await context.storage.save_symbols(symbols, lib.id)
+
+        return symbols, lib, None
+
+    except Exception as e:
+        return None, lib, str(e)
 
 
 async def serve(
@@ -175,13 +259,22 @@ async def serve(
             ),
             Tool(
                 name="repo-ctx-analyze",
-                description="Analyze source code to extract symbols (functions, classes, methods, etc.). Supports Python, JavaScript, TypeScript, and Java. Returns detailed symbol information including signatures, visibility, documentation, and location.",
+                description="Analyze source code to extract symbols (functions, classes, methods, etc.). Supports Python, JavaScript, TypeScript, Java, and Kotlin. Can analyze local paths OR indexed repositories. Returns detailed symbol information including signatures, visibility, documentation, and location.",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Path to file or directory to analyze (absolute or relative)"
+                            "description": "Path to file or directory to analyze (absolute or relative). Not required if repoId is provided."
+                        },
+                        "repoId": {
+                            "type": "string",
+                            "description": "Optional: Repository ID of an indexed repo (e.g., /owner/repo). If provided, analyzes the indexed repository instead of a local path."
+                        },
+                        "refresh": {
+                            "type": "boolean",
+                            "description": "Force re-fetch and re-analyze for indexed repos (default: false)",
+                            "default": False
                         },
                         "language": {
                             "type": "string",
@@ -204,19 +297,22 @@ async def serve(
                             "enum": ["text", "json", "yaml"],
                             "default": "text"
                         }
-                    },
-                    "required": ["path"]
+                    }
                 }
             ),
             Tool(
                 name="repo-ctx-search-symbol",
-                description="Search for symbols by name or pattern across analyzed code. Use fuzzy matching to find functions, classes, methods even with partial names. Useful for code navigation and exploration. Supports Python, JavaScript, TypeScript, and Java.",
+                description="Search for symbols by name or pattern across analyzed code. Can search local paths OR indexed repositories. Use fuzzy matching to find functions, classes, methods even with partial names. Useful for code navigation and exploration.",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Path to file or directory to search in"
+                            "description": "Path to file or directory to search in. Not required if repoId is provided."
+                        },
+                        "repoId": {
+                            "type": "string",
+                            "description": "Optional: Repository ID of an indexed repo (e.g., /owner/repo). If provided, searches the indexed repository instead of a local path."
                         },
                         "query": {
                             "type": "string",
@@ -239,18 +335,22 @@ async def serve(
                             "default": "text"
                         }
                     },
-                    "required": ["path", "query"]
+                    "required": ["query"]
                 }
             ),
             Tool(
                 name="repo-ctx-get-symbol-detail",
-                description="Get detailed information about a specific symbol including its full signature, documentation, metadata, and source location. Use after finding a symbol with search-symbol.",
+                description="Get detailed information about a specific symbol including its full signature, documentation, metadata, and source location. Can search local paths OR indexed repositories. Use after finding a symbol with search-symbol.",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Path to file or directory"
+                            "description": "Path to file or directory. Not required if repoId is provided."
+                        },
+                        "repoId": {
+                            "type": "string",
+                            "description": "Optional: Repository ID of an indexed repo (e.g., /owner/repo). If provided, searches the indexed repository instead of a local path."
                         },
                         "symbolName": {
                             "type": "string",
@@ -263,7 +363,7 @@ async def serve(
                             "default": "text"
                         }
                     },
-                    "required": ["path", "symbolName"]
+                    "required": ["symbolName"]
                 }
             ),
             Tool(
@@ -484,7 +584,9 @@ async def serve(
             from .analysis import CodeAnalyzer, SymbolType
             import os
 
-            path = arguments["path"]
+            path = arguments.get("path")
+            repo_id = arguments.get("repoId")
+            force_refresh = arguments.get("refresh", False)
             language_filter = arguments.get("language")
             symbol_type_filter = arguments.get("symbolType")
             include_private = arguments.get("includePrivate", True)
@@ -492,34 +594,54 @@ async def serve(
 
             try:
                 analyzer = CodeAnalyzer()
-                path_obj = Path(path)
-
-                if not path_obj.exists():
-                    return [TextContent(type="text", text=f"Error: Path '{path}' does not exist")]
-
-                # Collect files to analyze
+                all_symbols = []
                 files = {}
-                if path_obj.is_file():
-                    if analyzer.detect_language(str(path_obj)):
-                        with open(path_obj, 'r', encoding='utf-8') as f:
-                            files[str(path_obj)] = f.read()
-                elif path_obj.is_dir():
-                    for root, _, filenames in os.walk(path_obj):
-                        for filename in filenames:
-                            file_path = os.path.join(root, filename)
-                            if analyzer.detect_language(filename):
-                                try:
-                                    with open(file_path, 'r', encoding='utf-8') as f:
-                                        files[file_path] = f.read()
-                                except (UnicodeDecodeError, PermissionError):
-                                    continue
+                source_info = path or repo_id
 
-                if not files:
-                    return [TextContent(type="text", text=f"No supported files found in '{path}'")]
+                # Check if using indexed repo
+                if repo_id:
+                    symbols, lib, error = await get_or_analyze_repo(context, repo_id, force_refresh=force_refresh)
 
-                # Analyze files
-                results = analyzer.analyze_files(files)
-                all_symbols = analyzer.aggregate_symbols(results)
+                    if error:
+                        return [TextContent(type="text", text=f"Error: {error}")]
+
+                    if not symbols:
+                        return [TextContent(type="text", text=f"No symbols found in '{repo_id}'")]
+
+                    all_symbols = symbols
+                    source_info = f"{repo_id} (indexed)"
+
+                elif path:
+                    # Use local path
+                    path_obj = Path(path)
+
+                    if not path_obj.exists():
+                        return [TextContent(type="text", text=f"Error: Path '{path}' does not exist")]
+
+                    # Collect files to analyze
+                    if path_obj.is_file():
+                        if analyzer.detect_language(str(path_obj)):
+                            with open(path_obj, 'r', encoding='utf-8') as f:
+                                files[str(path_obj)] = f.read()
+                    elif path_obj.is_dir():
+                        for root, _, filenames in os.walk(path_obj):
+                            for filename in filenames:
+                                file_path = os.path.join(root, filename)
+                                if analyzer.detect_language(filename):
+                                    try:
+                                        with open(file_path, 'r', encoding='utf-8') as f:
+                                            files[file_path] = f.read()
+                                    except (UnicodeDecodeError, PermissionError):
+                                        continue
+
+                    if not files:
+                        return [TextContent(type="text", text=f"No supported files found in '{path}'")]
+
+                    # Analyze files
+                    results = analyzer.analyze_files(files)
+                    all_symbols = analyzer.aggregate_symbols(results)
+                else:
+                    return [TextContent(type="text", text="Error: Either 'path' or 'repoId' must be provided")]
 
                 # Apply filters
                 if language_filter:
@@ -537,8 +659,8 @@ async def serve(
                     import json
                     # Structured output
                     output_data = {
-                        "path": str(path),
-                        "files_analyzed": len(files),
+                        "source": source_info,
+                        "files_analyzed": len(files) if files else "stored",
                         "statistics": stats,
                         "symbols": [
                             {
@@ -563,11 +685,14 @@ async def serve(
                 else:
                     # Text output with emojis
                     output = []
-                    output.append(f"📊 Code Analysis Results for '{path}':\n\n")
+                    output.append(f"📊 Code Analysis Results for '{source_info}':\n\n")
 
                     output.append(f"**Summary:**\n")
                     output.append(f"- Total symbols: {stats['total_symbols']}\n")
-                    output.append(f"- Files analyzed: {len(files)}\n\n")
+                    if files:
+                        output.append(f"- Files analyzed: {len(files)}\n\n")
+                    else:
+                        output.append(f"- Source: indexed repository\n\n")
 
                     output.append("**Symbols by type:**\n")
                     for stype, count in stats['by_type'].items():
@@ -603,7 +728,8 @@ async def serve(
             from .analysis import CodeAnalyzer, SymbolType
             import os
 
-            path = arguments["path"]
+            path = arguments.get("path")
+            repo_id = arguments.get("repoId")
             query = arguments["query"].lower()
             symbol_type_filter = arguments.get("symbolType")
             language_filter = arguments.get("language")
@@ -611,34 +737,52 @@ async def serve(
 
             try:
                 analyzer = CodeAnalyzer()
-                path_obj = Path(path)
+                all_symbols = []
 
-                if not path_obj.exists():
-                    return [TextContent(type="text", text=f"Error: Path '{path}' does not exist")]
+                # Check if using indexed repo
+                if repo_id:
+                    symbols, lib, error = await get_or_analyze_repo(context, repo_id)
 
-                # Collect and analyze files
-                files = {}
-                if path_obj.is_file():
-                    if analyzer.detect_language(str(path_obj)):
-                        with open(path_obj, 'r', encoding='utf-8') as f:
-                            files[str(path_obj)] = f.read()
-                elif path_obj.is_dir():
-                    for root, _, filenames in os.walk(path_obj):
-                        for filename in filenames:
-                            file_path = os.path.join(root, filename)
-                            if analyzer.detect_language(filename):
-                                try:
-                                    with open(file_path, 'r', encoding='utf-8') as f:
-                                        files[file_path] = f.read()
-                                except (UnicodeDecodeError, PermissionError):
-                                    continue
+                    if error:
+                        return [TextContent(type="text", text=f"Error: {error}")]
 
-                if not files:
-                    return [TextContent(type="text", text=f"No supported files found in '{path}'")]
+                    if not symbols:
+                        return [TextContent(type="text", text=f"No symbols found in '{repo_id}'")]
 
-                # Analyze and filter
-                results = analyzer.analyze_files(files)
-                all_symbols = analyzer.aggregate_symbols(results)
+                    all_symbols = symbols
+
+                elif path:
+                    # Use local path
+                    path_obj = Path(path)
+
+                    if not path_obj.exists():
+                        return [TextContent(type="text", text=f"Error: Path '{path}' does not exist")]
+
+                    # Collect and analyze files
+                    files = {}
+                    if path_obj.is_file():
+                        if analyzer.detect_language(str(path_obj)):
+                            with open(path_obj, 'r', encoding='utf-8') as f:
+                                files[str(path_obj)] = f.read()
+                    elif path_obj.is_dir():
+                        for root, _, filenames in os.walk(path_obj):
+                            for filename in filenames:
+                                file_path = os.path.join(root, filename)
+                                if analyzer.detect_language(filename):
+                                    try:
+                                        with open(file_path, 'r', encoding='utf-8') as f:
+                                            files[file_path] = f.read()
+                                    except (UnicodeDecodeError, PermissionError):
+                                        continue
+
+                    if not files:
+                        return [TextContent(type="text", text=f"No supported files found in '{path}'")]
+
+                    # Analyze and filter
+                    results = analyzer.analyze_files(files)
+                    all_symbols = analyzer.aggregate_symbols(results)
+                else:
+                    return [TextContent(type="text", text="Error: Either 'path' or 'repoId' must be provided")]
 
                 # Search by name (case-insensitive substring match)
                 matching = [s for s in all_symbols if query in s.name.lower()]
@@ -706,40 +850,59 @@ async def serve(
             import os
             import json
 
-            path = arguments["path"]
+            path = arguments.get("path")
+            repo_id = arguments.get("repoId")
             symbol_name = arguments["symbolName"]
             output_format = arguments.get("outputFormat", "text")
 
             try:
                 analyzer = CodeAnalyzer()
-                path_obj = Path(path)
+                all_symbols = []
 
-                if not path_obj.exists():
-                    return [TextContent(type="text", text=f"Error: Path '{path}' does not exist")]
+                # Check if using indexed repo
+                if repo_id:
+                    symbols, lib, error = await get_or_analyze_repo(context, repo_id)
 
-                # Collect and analyze files
-                files = {}
-                if path_obj.is_file():
-                    if analyzer.detect_language(str(path_obj)):
-                        with open(path_obj, 'r', encoding='utf-8') as f:
-                            files[str(path_obj)] = f.read()
-                elif path_obj.is_dir():
-                    for root, _, filenames in os.walk(path_obj):
-                        for filename in filenames:
-                            file_path = os.path.join(root, filename)
-                            if analyzer.detect_language(filename):
-                                try:
-                                    with open(file_path, 'r', encoding='utf-8') as f:
-                                        files[file_path] = f.read()
-                                except (UnicodeDecodeError, PermissionError):
-                                    continue
+                    if error:
+                        return [TextContent(type="text", text=f"Error: {error}")]
 
-                if not files:
-                    return [TextContent(type="text", text=f"No supported files found in '{path}'")]
+                    if not symbols:
+                        return [TextContent(type="text", text=f"No symbols found in '{repo_id}'")]
 
-                # Analyze and find symbol
-                results = analyzer.analyze_files(files)
-                all_symbols = analyzer.aggregate_symbols(results)
+                    all_symbols = symbols
+
+                elif path:
+                    # Use local path
+                    path_obj = Path(path)
+
+                    if not path_obj.exists():
+                        return [TextContent(type="text", text=f"Error: Path '{path}' does not exist")]
+
+                    # Collect and analyze files
+                    files = {}
+                    if path_obj.is_file():
+                        if analyzer.detect_language(str(path_obj)):
+                            with open(path_obj, 'r', encoding='utf-8') as f:
+                                files[str(path_obj)] = f.read()
+                    elif path_obj.is_dir():
+                        for root, _, filenames in os.walk(path_obj):
+                            for filename in filenames:
+                                file_path = os.path.join(root, filename)
+                                if analyzer.detect_language(filename):
+                                    try:
+                                        with open(file_path, 'r', encoding='utf-8') as f:
+                                            files[file_path] = f.read()
+                                    except (UnicodeDecodeError, PermissionError):
+                                        continue
+
+                    if not files:
+                        return [TextContent(type="text", text=f"No supported files found in '{path}'")]
+
+                    # Analyze and find symbol
+                    results = analyzer.analyze_files(files)
+                    all_symbols = analyzer.aggregate_symbols(results)
+                else:
+                    return [TextContent(type="text", text="Error: Either 'path' or 'repoId' must be provided")]
 
                 # Find by exact name or qualified name
                 matching = [s for s in all_symbols

@@ -40,6 +40,7 @@ class Storage:
                     project_name TEXT NOT NULL,
                     description TEXT,
                     default_version TEXT,
+                    provider TEXT DEFAULT 'github',
                     last_indexed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(group_name, project_name)
                 )
@@ -69,28 +70,36 @@ class Storage:
             await db.execute("CREATE INDEX IF NOT EXISTS idx_libraries_search ON libraries(group_name, project_name)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_documents_version ON documents(version_id)")
 
-            # Run code analysis migration
-            await self._run_code_analysis_migration(db)
+            # Run migrations
+            await self._run_migrations(db)
 
             await db.commit()
 
-    async def _run_code_analysis_migration(self, db):
-        """Run code analysis schema migration."""
+    async def _run_migrations(self, db):
+        """Run all pending migrations."""
         from pathlib import Path
-        migration_path = Path(__file__).parent / "migrations" / "002_code_analysis.sql"
+        migrations_dir = Path(__file__).parent / "migrations"
 
-        if migration_path.exists():
-            migration_sql = migration_path.read_text()
-            # Execute migration (split by semicolon for multiple statements)
-            await db.executescript(migration_sql)
+        if not migrations_dir.exists():
+            return
+
+        # Run migrations in order
+        migration_files = sorted(migrations_dir.glob("*.sql"))
+        for migration_path in migration_files:
+            try:
+                migration_sql = migration_path.read_text()
+                await db.executescript(migration_sql)
+            except Exception:
+                # Migration may have already been applied (e.g., column exists)
+                pass
     
     async def save_library(self, library: Library) -> int:
         """Save or update library."""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
-                """INSERT OR REPLACE INTO libraries (group_name, project_name, description, default_version)
-                   VALUES (?, ?, ?, ?)""",
-                (library.group_name, library.project_name, library.description, library.default_version)
+                """INSERT OR REPLACE INTO libraries (group_name, project_name, description, default_version, provider)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (library.group_name, library.project_name, library.description, library.default_version, library.provider)
             )
             await db.commit()
             return cursor.lastrowid
@@ -159,7 +168,8 @@ class Storage:
                 group_name=row["group_name"],
                 project_name=row["project_name"],
                 description=row["description"],
-                default_version=row["default_version"]
+                default_version=row["default_version"],
+                provider=row["provider"] if "provider" in row.keys() else "github"
             )
     
     async def get_version_id(self, library_id: int, version_tag: str) -> Optional[int]:
@@ -244,6 +254,7 @@ class Storage:
                 project_name=row["project_name"],
                 description=row["description"],
                 default_version=row["default_version"],
+                provider=row["provider"] if "provider" in row.keys() else "github",
                 last_indexed=row["last_indexed"]
             ) for row in rows]
 
@@ -409,16 +420,25 @@ class Storage:
             return [dict(row) for row in rows]
 
     async def search_symbols(self, repository_id: int, query: str) -> list[dict]:
-        """Full-text search symbols."""
+        """Full-text search symbols. If query is empty, returns all symbols for the repository."""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                """SELECT s.* FROM symbols s
-                   JOIN symbols_fts fts ON s.id = fts.rowid
-                   WHERE fts.symbols_fts MATCH ? AND s.repository_id = ?
-                   ORDER BY rank""",
-                (query, repository_id)
-            )
+
+            if not query or not query.strip():
+                # Return all symbols for the repository
+                cursor = await db.execute(
+                    "SELECT * FROM symbols WHERE repository_id = ? ORDER BY file_path, line_start",
+                    (repository_id,)
+                )
+            else:
+                # Use FTS for search
+                cursor = await db.execute(
+                    """SELECT s.* FROM symbols s
+                       JOIN symbols_fts fts ON s.id = fts.rowid
+                       WHERE fts.symbols_fts MATCH ? AND s.repository_id = ?
+                       ORDER BY rank""",
+                    (query, repository_id)
+                )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 

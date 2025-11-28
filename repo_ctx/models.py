@@ -10,6 +10,7 @@ class Library:
     project_name: str
     description: str
     default_version: str
+    provider: str = "github"  # Provider type: github, gitlab, local
     id: Optional[int] = None
     last_indexed: Optional[datetime] = None
 

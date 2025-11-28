@@ -136,9 +136,11 @@ Run 'repo-ctx <command> --help' for command details.
     code_analyze = code_subparsers.add_parser(
         "analyze",
         help="Analyze code structure",
-        description="Extract symbols from source code"
+        description="Extract symbols from source code (local path or indexed repo)"
     )
-    code_analyze.add_argument("path", help="Path to file or directory")
+    code_analyze.add_argument("path", help="Path to file/directory OR repo ID (e.g., /owner/repo)")
+    code_analyze.add_argument("--repo", "-r", action="store_true", help="Treat path as indexed repository ID")
+    code_analyze.add_argument("--refresh", action="store_true", help="Force re-fetch and re-analyze for repos")
     code_analyze.add_argument("--lang", "-l", choices=["python", "javascript", "typescript", "java", "kotlin"],
                               help="Filter by language")
     code_analyze.add_argument("--type", "-t", choices=["function", "class", "method", "interface", "enum"],
@@ -150,10 +152,11 @@ Run 'repo-ctx <command> --help' for command details.
     code_find = code_subparsers.add_parser(
         "find",
         help="Find symbols by pattern",
-        description="Search for symbols by name pattern"
+        description="Search for symbols by name pattern (local path or indexed repo)"
     )
-    code_find.add_argument("path", help="Path to search in")
+    code_find.add_argument("path", help="Path to search in OR repo ID (e.g., /owner/repo)")
     code_find.add_argument("query", help="Symbol name or pattern")
+    code_find.add_argument("--repo", "-r", action="store_true", help="Treat path as indexed repository ID")
     code_find.add_argument("--type", "-t", choices=["function", "class", "method", "interface", "enum"],
                            help="Filter by symbol type")
     code_find.add_argument("--lang", "-l", choices=["python", "javascript", "typescript", "java", "kotlin"],
@@ -163,10 +166,11 @@ Run 'repo-ctx <command> --help' for command details.
     code_info = code_subparsers.add_parser(
         "info",
         help="Get symbol details",
-        description="Get detailed information about a symbol"
+        description="Get detailed information about a symbol (local path or indexed repo)"
     )
-    code_info.add_argument("path", help="Path to search in")
+    code_info.add_argument("path", help="Path to search in OR repo ID (e.g., /owner/repo)")
     code_info.add_argument("name", help="Symbol name or qualified name")
+    code_info.add_argument("--repo", "-r", action="store_true", help="Treat path as indexed repository ID")
 
     # code symbols
     code_symbols = code_subparsers.add_parser(
