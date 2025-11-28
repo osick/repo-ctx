@@ -11,11 +11,17 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from rich.markup import escape as rich_escape
 from rich import box
 
 from .. import __version__
 
 console = Console()
+
+
+def print_error(message: str):
+    """Print an error message, escaping any rich markup in the message."""
+    console.print(f"[red]Error: {rich_escape(str(message))}[/red]")
 
 
 async def get_indexed_repos() -> List[str]:
@@ -283,7 +289,7 @@ async def execute_repo_index():
         console.print(f"[green]Successfully indexed {path}[/green]")
 
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        print_error(e)
 
 
 async def execute_repo_search():
@@ -330,7 +336,7 @@ async def execute_repo_search():
         console.print(table)
 
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        print_error(e)
 
 
 async def execute_repo_list():
@@ -375,7 +381,7 @@ async def execute_repo_list():
         console.print(table)
 
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        print_error(e)
 
 
 async def execute_repo_docs():
@@ -425,7 +431,7 @@ async def execute_repo_docs():
         console.print(Panel(content[:2000] + "..." if len(content) > 2000 else content, title=repo_id))
 
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        print_error(e)
 
 
 async def execute_code_analyze():
@@ -471,7 +477,7 @@ async def execute_code_analyze():
         symbols, lib, error = await get_or_analyze_repo(repo_id)
 
         if error:
-            console.print(f"[red]Error: {error}[/red]")
+            print_error(error)
             return
 
         if not symbols:
@@ -539,7 +545,7 @@ async def execute_code_analyze():
                                 continue
 
         except Exception as e:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
             return
 
     if not files:
@@ -571,7 +577,7 @@ async def execute_code_analyze():
             console.print(table)
 
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        print_error(e)
 
 
 async def execute_code_find():
@@ -626,7 +632,7 @@ async def execute_code_find():
         symbols, lib, error = await get_or_analyze_repo(repo_id)
 
         if error:
-            console.print(f"[red]Error: {error}[/red]")
+            print_error(error)
             return
 
         if not symbols:
@@ -714,7 +720,7 @@ async def execute_code_find():
                                 continue
 
         except Exception as e:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
             return
 
         if not files:
@@ -760,7 +766,7 @@ async def execute_code_find():
                 console.print(f"[dim]... and {len(matching) - 20} more[/dim]")
 
         except Exception as e:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
 
 
 async def execute_code_info():
@@ -812,7 +818,7 @@ async def execute_code_info():
         symbols, lib, error = await get_or_analyze_repo(repo_id)
 
         if error:
-            console.print(f"[red]Error: {error}[/red]")
+            print_error(error)
             return
 
         if not symbols:
@@ -921,7 +927,7 @@ async def execute_code_info():
             ))
 
         except Exception as e:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
 
 
 async def execute_code_symbols():
@@ -1011,7 +1017,7 @@ async def execute_code_symbols():
             language = analyzer.detect_language(file_path)
 
         except Exception as e:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
             return
 
     else:  # local
@@ -1051,7 +1057,7 @@ async def execute_code_symbols():
                 code = f.read()
 
         except Exception as e:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
             return
 
     if not code:
@@ -1092,7 +1098,7 @@ async def execute_code_symbols():
             console.print()
 
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        print_error(e)
 
 
 async def execute_config_show():
@@ -1147,7 +1153,7 @@ async def execute_config_show():
             console.print(f"  {loc} {status}")
 
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        print_error(e)
 
 
 async def execute_command(cmd: str):

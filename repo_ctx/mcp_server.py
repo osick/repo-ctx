@@ -213,7 +213,7 @@ async def serve(
             ),
             Tool(
                 name="repo-ctx-docs",
-                description="Retrieve documentation for a specific indexed repository. Supports topic filtering and token-based limiting (recommended) or page-based pagination. Works with any indexed repository (local, GitHub, GitLab).",
+                description="Retrieve documentation for a specific indexed repository. Supports topic filtering and token-based limiting (recommended) or page-based pagination. Works with any indexed repository (local, GitHub, GitLab). Optionally include code analysis summary with class hierarchy and API overview.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -237,6 +237,11 @@ async def serve(
                         "includeMetadata": {
                             "type": "boolean",
                             "description": "Include quality scores, document types, and metadata in response (default: false)",
+                            "default": False
+                        },
+                        "includeCodeAnalysis": {
+                            "type": "boolean",
+                            "description": "Include code analysis summary with symbol statistics, class hierarchy (mermaid), and public API overview (default: false)",
                             "default": False
                         }
                     },
@@ -390,9 +395,42 @@ async def serve(
                     },
                     "required": ["filePath"]
                 }
+            ),
+            Tool(
+                name="repo-ctx-dependency-graph",
+                description="Generate a dependency graph showing relationships between code elements. Supports multiple graph types (file, module, class, function) and output formats (JSON, DOT, GraphML). Essential for understanding code architecture and dependencies.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to file or directory to analyze. Not required if repoId is provided."
+                        },
+                        "repoId": {
+                            "type": "string",
+                            "description": "Optional: Repository ID of an indexed repo (e.g., /owner/repo). If provided, analyzes the indexed repository instead of a local path."
+                        },
+                        "graphType": {
+                            "type": "string",
+                            "description": "Type of dependency graph to generate",
+                            "enum": ["file", "module", "class", "function", "symbol"],
+                            "default": "class"
+                        },
+                        "depth": {
+                            "type": "integer",
+                            "description": "Maximum traversal depth (default: unlimited)"
+                        },
+                        "outputFormat": {
+                            "type": "string",
+                            "description": "Output format: json (JGF), dot (GraphViz), graphml (XML)",
+                            "enum": ["json", "dot", "graphml"],
+                            "default": "json"
+                        }
+                    }
+                }
             )
         ]
-    
+
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if name == "repo-ctx-search":
@@ -506,6 +544,7 @@ async def serve(
             page = arguments.get("page", 1)
             max_tokens = arguments.get("maxTokens")
             include_metadata = arguments.get("includeMetadata", False)
+            include_code_analysis = arguments.get("includeCodeAnalysis", False)
 
             try:
                 result = await context.get_documentation(
@@ -534,6 +573,19 @@ async def serve(
                         response_text += f"  - Quality Score: {doc_meta['quality_score']}/100\n"
                         response_text += f"  - Reading Time: {doc_meta['reading_time']} min\n"
                         response_text += f"  - Code Examples: {doc_meta['snippet_count']}\n"
+
+                # Optionally append code analysis
+                if include_code_analysis:
+                    from .analysis import CodeAnalysisReport
+
+                    # Get symbols for the repository
+                    symbols, lib, error = await get_or_analyze_repo(context, library_id)
+
+                    if not error and symbols:
+                        # Generate code analysis report
+                        report = CodeAnalysisReport(symbols)
+                        markdown_report = report.generate_markdown(include_mermaid=True)
+                        response_text += f"\n\n---\n\n{markdown_report}"
 
                 return [TextContent(type="text", text=response_text)]
             except Exception as e:
@@ -1100,6 +1152,127 @@ async def serve(
                 return [TextContent(type="text", text=f"Error: Cannot read '{file_path}' - not a text file")]
             except Exception as e:
                 return [TextContent(type="text", text=f"Error analyzing file: {str(e)}")]
+
+        elif name == "repo-ctx-dependency-graph":
+            from pathlib import Path
+            from .analysis import CodeAnalyzer, DependencyGraph, GraphType
+            import os
+
+            path = arguments.get("path")
+            repo_id = arguments.get("repoId")
+            graph_type_str = arguments.get("graphType", "class")
+            max_depth = arguments.get("depth")
+            output_format = arguments.get("outputFormat", "json")
+
+            try:
+                analyzer = CodeAnalyzer()
+                graph_builder = DependencyGraph()
+                all_symbols = []
+                all_dependencies = []
+                source_info = path or repo_id or "unknown"
+                repository_info = None
+
+                # Determine graph type
+                graph_type_map = {
+                    "file": GraphType.FILE,
+                    "module": GraphType.MODULE,
+                    "class": GraphType.CLASS,
+                    "function": GraphType.FUNCTION,
+                    "symbol": GraphType.SYMBOL
+                }
+                graph_type = graph_type_map.get(graph_type_str, GraphType.CLASS)
+
+                # Check if using indexed repo
+                if repo_id:
+                    symbols, lib, error = await get_or_analyze_repo(context, repo_id)
+
+                    if error:
+                        return [TextContent(type="text", text=f"Error: {error}")]
+
+                    if not symbols:
+                        # Return empty graph
+                        empty_result = {"graph": {"nodes": {}, "edges": []}}
+                        return [TextContent(type="text", text=json.dumps(empty_result, indent=2))]
+
+                    all_symbols = symbols
+                    source_info = f"{repo_id} (indexed)"
+
+                    # Get repository info
+                    group, project = parse_repo_id(repo_id)
+                    lib_obj = await context.storage.get_library(group, project)
+                    if lib_obj:
+                        repository_info = {
+                            "id": repo_id,
+                            "provider": lib_obj.provider,
+                            "group": group,
+                            "project": project
+                        }
+
+                elif path:
+                    # Use local path
+                    path_obj = Path(path)
+
+                    if not path_obj.exists():
+                        return [TextContent(type="text", text=f"Error: Path '{path}' does not exist")]
+
+                    # Collect files
+                    files = {}
+                    if path_obj.is_file():
+                        if analyzer.detect_language(str(path_obj)):
+                            with open(path_obj, 'r', encoding='utf-8') as f:
+                                files[str(path_obj)] = f.read()
+                    else:
+                        for root, _, filenames in os.walk(path_obj):
+                            for filename in filenames:
+                                file_path = os.path.join(root, filename)
+                                if analyzer.detect_language(filename):
+                                    try:
+                                        with open(file_path, 'r', encoding='utf-8') as f:
+                                            files[file_path] = f.read()
+                                    except (UnicodeDecodeError, PermissionError):
+                                        continue
+
+                    if not files:
+                        # Return empty graph
+                        empty_result = {"graph": {"nodes": {}, "edges": []}}
+                        return [TextContent(type="text", text=json.dumps(empty_result, indent=2))]
+
+                    # Analyze files
+                    results = analyzer.analyze_files(files)
+                    all_symbols = analyzer.aggregate_symbols(results)
+
+                    # Extract dependencies (pass symbols for call extraction)
+                    for file_path, code in files.items():
+                        file_symbols = results.get(file_path, [])
+                        deps = analyzer.extract_dependencies(code, file_path, file_symbols)
+                        all_dependencies.extend(deps)
+
+                    source_info = path
+
+                else:
+                    return [TextContent(type="text", text="Error: Either 'path' or 'repoId' must be provided")]
+
+                # Build the graph
+                result = graph_builder.build(
+                    symbols=all_symbols,
+                    dependencies=all_dependencies,
+                    graph_type=graph_type,
+                    graph_id=source_info,
+                    graph_label=f"Dependency Graph: {source_info}",
+                    max_depth=max_depth,
+                    repository_info=repository_info
+                )
+
+                # Output based on format
+                if output_format == "dot":
+                    return [TextContent(type="text", text=graph_builder.to_dot(result))]
+                elif output_format == "graphml":
+                    return [TextContent(type="text", text=graph_builder.to_graphml(result))]
+                else:
+                    return [TextContent(type="text", text=graph_builder.to_json(result))]
+
+            except Exception as e:
+                return [TextContent(type="text", text=f"Error generating dependency graph: {str(e)}")]
 
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]

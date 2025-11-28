@@ -293,8 +293,17 @@ class PythonExtractor:
         for child in node.children:
             self._extract_calls_from_node(child, calls)
 
-    def extract_dependencies(self, code: str, file_path: str) -> List[Dict[str, Any]]:
-        """Extract all dependencies (imports, calls, etc.)."""
+    def extract_dependencies(self, code: str, file_path: str, symbols: Optional[List[Symbol]] = None) -> List[Dict[str, Any]]:
+        """Extract all dependencies (imports, calls, etc.).
+
+        Args:
+            code: Source code content
+            file_path: Path to the file
+            symbols: Optional list of symbols to extract calls from
+
+        Returns:
+            List of dependency dictionaries
+        """
         imports = self.extract_imports(code, file_path)
 
         dependencies = []
@@ -307,7 +316,86 @@ class PythonExtractor:
                 "is_external": True  # Assume external for now
             })
 
+        # If symbols provided, extract function calls
+        if symbols:
+            calls = self.extract_all_calls(code, file_path, symbols)
+            dependencies.extend(calls)
+
         return dependencies
+
+    def extract_all_calls(self, code: str, file_path: str, symbols: List[Symbol]) -> List[Dict[str, Any]]:
+        """Extract function calls from all functions/methods in the file.
+
+        Args:
+            code: Source code content
+            file_path: Path to the file
+            symbols: List of symbols from this file
+
+        Returns:
+            List of call dependency dictionaries
+        """
+        self.current_file = file_path
+        self.current_code = code
+
+        tree = self.parser.parse(bytes(code, "utf8"))
+        root = tree.root_node
+
+        # Build a map of symbol names for quick lookup
+        symbol_names = {s.name for s in symbols}
+        qualified_names = {s.qualified_name for s in symbols if s.qualified_name}
+
+        # Also map methods to their qualified names
+        method_to_qualified = {}
+        for s in symbols:
+            if s.symbol_type == SymbolType.METHOD and s.qualified_name:
+                method_to_qualified[s.name] = s.qualified_name
+
+        call_dependencies = []
+
+        # Extract calls from each function/method
+        func_symbols = [s for s in symbols
+                       if s.symbol_type in (SymbolType.FUNCTION, SymbolType.METHOD)
+                       and s.file_path == file_path]
+
+        for func_symbol in func_symbols:
+            func_node = self._find_symbol_node(root, func_symbol)
+            if not func_node:
+                continue
+
+            # Get the caller's qualified name or just name
+            caller_name = func_symbol.qualified_name or func_symbol.name
+
+            # Extract all calls within this function
+            calls = []
+            self._extract_calls_from_node(func_node, calls)
+
+            for call in calls:
+                callee_name = call["name"]
+
+                # Handle method calls like self.method()
+                if callee_name.startswith("self."):
+                    method_name = callee_name[5:]  # Remove "self."
+                    # Try to find in method_to_qualified
+                    if method_name in method_to_qualified:
+                        callee_name = method_to_qualified[method_name]
+                    elif method_name in symbol_names:
+                        callee_name = method_name
+
+                # Check if callee is a known symbol (internal call)
+                is_internal = (callee_name in symbol_names or
+                              callee_name in qualified_names or
+                              callee_name.split(".")[-1] in symbol_names)
+
+                call_dependencies.append({
+                    "type": "call",
+                    "source": file_path,
+                    "caller": caller_name,
+                    "callee": callee_name,
+                    "line": call.get("line"),
+                    "is_internal": is_internal
+                })
+
+        return call_dependencies
 
     def _find_symbol_node(self, root: Node, symbol: Symbol) -> Optional[Node]:
         """Find the AST node corresponding to a symbol."""

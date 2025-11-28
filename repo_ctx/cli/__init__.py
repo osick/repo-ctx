@@ -123,6 +123,8 @@ Run 'repo-ctx <command> --help' for command details.
     repo_docs.add_argument("--topic", "-t", help="Filter by topic")
     repo_docs.add_argument("--max-tokens", type=int, help="Maximum tokens to return")
     repo_docs.add_argument("--page", type=int, default=1, help="Page number (default: 1)")
+    repo_docs.add_argument("--include-code", action="store_true",
+                          help="Include code analysis summary (symbols, hierarchy, dependencies)")
 
     # === CODE commands ===
     code_parser = subparsers.add_parser(
@@ -180,6 +182,24 @@ Run 'repo-ctx <command> --help' for command details.
     )
     code_symbols.add_argument("file", help="Source file path")
     code_symbols.add_argument("--group", "-g", action="store_true", help="Group by type")
+
+    # code dep (dependency graph)
+    code_dep = code_subparsers.add_parser(
+        "dep",
+        help="Generate dependency graph",
+        description="Generate dependency graph in JSON, DOT, or GraphML format"
+    )
+    code_dep.add_argument("path", nargs="?", help="Path to file/directory OR repo ID (e.g., /owner/repo)")
+    code_dep.add_argument("--repo", "-r", action="store_true", help="Treat path as indexed repository ID")
+    code_dep.add_argument("--type", "-t",
+                          choices=["file", "module", "class", "function", "symbol"],
+                          default="class",
+                          help="Graph type (default: class)")
+    code_dep.add_argument("--depth", "-d", type=int, help="Maximum traversal depth")
+    code_dep.add_argument("--format", "-f",
+                          choices=["json", "dot", "graphml"],
+                          default="json",
+                          help="Output format (default: json)")
 
     # === CONFIG commands ===
     config_parser = subparsers.add_parser(

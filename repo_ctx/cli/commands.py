@@ -10,9 +10,15 @@ from typing import Any, Optional, List, Tuple
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
+from rich.markup import escape as rich_escape
 from rich import box
 
 console = Console()
+
+
+def print_error(message: str):
+    """Print an error message, escaping any rich markup in the message."""
+    console.print(f"[red]Error: {rich_escape(str(message))}[/red]")
 
 
 def parse_repo_id(repo_id: str) -> Tuple[str, str]:
@@ -171,7 +177,7 @@ async def repo_index(args):
         if args.output == "json":
             print(json.dumps({"status": "error", "message": str(e)}))
         else:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
         sys.exit(1)
 
 
@@ -245,7 +251,7 @@ async def repo_search(args):
         if args.output == "json":
             print(json.dumps({"status": "error", "message": str(e)}))
         else:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
         sys.exit(1)
 
 
@@ -319,7 +325,7 @@ async def repo_list(args):
         if args.output == "json":
             print(json.dumps({"status": "error", "message": str(e)}))
         else:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
         sys.exit(1)
 
 
@@ -340,6 +346,30 @@ async def repo_docs(args):
             max_tokens=args.max_tokens
         )
 
+        # If include-code flag is set, append code analysis
+        include_code = getattr(args, 'include_code', False)
+        code_analysis_data = None
+
+        if include_code:
+            from ..analysis import CodeAnalysisReport
+
+            # Get symbols for the repository
+            symbols, lib, error = await get_or_analyze_repo(args.id)
+
+            if not error and symbols:
+                # Generate code analysis report
+                report = CodeAnalysisReport(symbols)
+                code_analysis_data = report.generate_json()
+
+                # Append markdown report to content
+                markdown_report = report.generate_markdown(include_mermaid=True)
+                result["content"][0]["text"] += f"\n\n---\n\n{markdown_report}"
+
+                # Add to metadata
+                if "metadata" not in result:
+                    result["metadata"] = {}
+                result["metadata"]["code_analysis"] = code_analysis_data
+
         if args.output == "json":
             print(json.dumps(result, indent=2))
         elif args.output == "yaml":
@@ -347,13 +377,14 @@ async def repo_docs(args):
             print(yaml.dump(result, default_flow_style=False))
         else:
             content = result["content"][0]["text"]
-            console.print(content)
+            # Use markup=False to avoid interpreting brackets as Rich markup
+            console.print(content, markup=False)
 
     except Exception as e:
         if args.output == "json":
             print(json.dumps({"status": "error", "message": str(e)}))
         else:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
         sys.exit(1)
 
 
@@ -364,7 +395,7 @@ async def repo_docs(args):
 async def handle_code_command(args):
     """Handle code subcommands."""
     if not args.code_command:
-        console.print("[yellow]Usage: repo-ctx code <analyze|find|info|symbols>[/yellow]")
+        console.print("[yellow]Usage: repo-ctx code <analyze|find|info|symbols|dep>[/yellow]")
         return
 
     if args.code_command == "analyze":
@@ -375,6 +406,8 @@ async def handle_code_command(args):
         await code_info(args)
     elif args.code_command == "symbols":
         code_symbols(args)
+    elif args.code_command == "dep":
+        await code_dep(args)
 
 
 async def code_analyze(args):
@@ -397,7 +430,7 @@ async def code_analyze(args):
                 if args.output == "json":
                     print(json.dumps({"status": "error", "message": error}))
                 else:
-                    console.print(f"[red]Error: {error}[/red]")
+                    print_error(error)
                 sys.exit(1)
 
             if not symbols:
@@ -510,7 +543,7 @@ async def code_analyze(args):
         if args.output == "json":
             print(json.dumps({"status": "error", "message": str(e)}))
         else:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
         sys.exit(1)
 
 
@@ -531,7 +564,7 @@ async def code_find(args):
                 if args.output == "json":
                     print(json.dumps({"status": "error", "message": error}))
                 else:
-                    console.print(f"[red]Error: {error}[/red]")
+                    print_error(error)
                 sys.exit(1)
 
             if not symbols:
@@ -634,7 +667,7 @@ async def code_find(args):
         if args.output == "json":
             print(json.dumps({"status": "error", "message": str(e)}))
         else:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
         sys.exit(1)
 
 
@@ -654,7 +687,7 @@ async def code_info(args):
                 if args.output == "json":
                     print(json.dumps({"status": "error", "message": error}))
                 else:
-                    console.print(f"[red]Error: {error}[/red]")
+                    print_error(error)
                 sys.exit(1)
 
             if not symbols:
@@ -752,7 +785,7 @@ async def code_info(args):
         if args.output == "json":
             print(json.dumps({"status": "error", "message": str(e)}))
         else:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
         sys.exit(1)
 
 
@@ -849,7 +882,138 @@ def code_symbols(args):
         if args.output == "json":
             print(json.dumps({"status": "error", "message": str(e)}))
         else:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
+        sys.exit(1)
+
+
+async def code_dep(args):
+    """Generate dependency graph."""
+    from ..analysis import CodeAnalyzer, DependencyGraph, GraphType
+
+    try:
+        analyzer = CodeAnalyzer()
+        graph_builder = DependencyGraph()
+        all_symbols = []
+        all_dependencies = []
+        source_info = args.path or ""
+        repository_info = None
+
+        # Determine graph type
+        graph_type_map = {
+            "file": GraphType.FILE,
+            "module": GraphType.MODULE,
+            "class": GraphType.CLASS,
+            "function": GraphType.FUNCTION,
+            "symbol": GraphType.SYMBOL
+        }
+        graph_type = graph_type_map.get(args.type, GraphType.CLASS)
+
+        # Determine output format (use --format if provided, else global -o)
+        output_format = getattr(args, 'format', 'json')
+
+        # Check if using indexed repo
+        if getattr(args, 'repo', False):
+            if not args.path:
+                console.print("[red]Error: Path is required when using --repo[/red]")
+                sys.exit(1)
+
+            symbols, lib, error = await get_or_analyze_repo(args.path)
+
+            if error:
+                print(json.dumps({"status": "error", "message": error}))
+                sys.exit(1)
+
+            if not symbols:
+                print(json.dumps({"graph": {"nodes": {}, "edges": []}}))
+                return
+
+            all_symbols = symbols
+            source_info = f"{args.path} (indexed)"
+
+            # Get dependencies from storage
+            from ..config import Config
+            from ..core import GitLabContext
+
+            config = Config.load()
+            context = GitLabContext(config)
+            await context.init()
+
+            group, project = parse_repo_id(args.path)
+            lib_obj = await context.storage.get_library(group, project)
+            if lib_obj:
+                repository_info = {
+                    "id": args.path,
+                    "provider": lib_obj.provider,
+                    "group": group,
+                    "project": project
+                }
+
+        elif args.path:
+            # Use local path
+            path_obj = Path(args.path)
+
+            if not path_obj.exists():
+                print(json.dumps({"status": "error", "message": f"Path '{args.path}' does not exist"}))
+                sys.exit(1)
+
+            # Collect files
+            files = {}
+            if path_obj.is_file():
+                if analyzer.detect_language(str(path_obj)):
+                    with open(path_obj, 'r', encoding='utf-8') as f:
+                        files[str(path_obj)] = f.read()
+            else:
+                for root, _, filenames in os.walk(path_obj):
+                    for filename in filenames:
+                        file_path = os.path.join(root, filename)
+                        if analyzer.detect_language(filename):
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    files[file_path] = f.read()
+                            except (UnicodeDecodeError, PermissionError):
+                                continue
+
+            if not files:
+                print(json.dumps({"graph": {"nodes": {}, "edges": []}}))
+                return
+
+            # Analyze files
+            results = analyzer.analyze_files(files)
+            all_symbols = analyzer.aggregate_symbols(results)
+
+            # Extract dependencies (pass symbols for call extraction)
+            for file_path, code in files.items():
+                file_symbols = results.get(file_path, [])
+                deps = analyzer.extract_dependencies(code, file_path, file_symbols)
+                all_dependencies.extend(deps)
+
+            source_info = args.path
+
+        else:
+            print(json.dumps({"status": "error", "message": "Path is required"}))
+            sys.exit(1)
+
+        # Build the graph
+        result = graph_builder.build(
+            symbols=all_symbols,
+            dependencies=all_dependencies,
+            graph_type=graph_type,
+            graph_id=source_info,
+            graph_label=f"Dependency Graph: {source_info}",
+            max_depth=args.depth,
+            repository_info=repository_info
+        )
+
+        # Output based on format
+        if output_format == "dot":
+            print(graph_builder.to_dot(result))
+        elif output_format == "graphml":
+            print(graph_builder.to_graphml(result))
+        else:
+            print(graph_builder.to_json(result))
+
+    except Exception as e:
+        print(json.dumps({"status": "error", "message": str(e)}))
         sys.exit(1)
 
 
@@ -921,5 +1085,5 @@ async def config_show(args):
         if args.output == "json":
             print(json.dumps({"status": "error", "message": str(e)}))
         else:
-            console.print(f"[red]Error: {e}[/red]")
+            print_error(e)
         sys.exit(1)

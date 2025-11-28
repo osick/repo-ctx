@@ -324,3 +324,188 @@ export GITLAB_TOKEN=glpat-xxx
 **Output formats:** `text` (default), `json`, `yaml`
 
 **Languages:** Python, JavaScript, TypeScript, Java, Kotlin
+
+---
+
+## Dependency Graph Commands
+
+### CLI
+
+```bash
+# Generate class dependency graph (JSON, default)
+repo-ctx code dep ./src --type class
+
+# Generate function call graph as DOT (GraphViz)
+repo-ctx code dep ./src --type function --format dot
+
+# Generate file dependency graph as GraphML
+repo-ctx code dep ./src --type file --format graphml
+
+# Analyze indexed repository
+repo-ctx code dep -r /owner/repo --type class
+
+# Limit traversal depth
+repo-ctx code dep ./src --type class --depth 3
+```
+
+### MCP Tool
+
+| Tool | Description |
+|------|-------------|
+| `repo-ctx-dependency-graph` | Generate dependency graphs |
+
+```javascript
+// Generate class dependency graph
+await mcp.call("repo-ctx-dependency-graph", {
+  path: "./src",
+  graphType: "class",
+  outputFormat: "json"
+});
+
+// Generate function call graph for indexed repo
+await mcp.call("repo-ctx-dependency-graph", {
+  repoId: "/owner/repo",
+  graphType: "function",
+  outputFormat: "dot"
+});
+```
+
+### Graph Types
+
+| Type | Description |
+|------|-------------|
+| `file` | File-level import dependencies |
+| `module` | Module/package dependencies |
+| `class` | Class inheritance and composition |
+| `function` | Function/method call graph |
+| `symbol` | Complete symbol graph (all relationships) |
+
+### Output Formats
+
+| Format | Description |
+|--------|-------------|
+| `json` | JSON Graph Format (JGF) - structured, machine-readable |
+| `dot` | GraphViz DOT - for visualization with `dot -Tsvg` |
+| `graphml` | GraphML XML - for graph analysis tools |
+
+---
+
+## Combined Documentation with Code Analysis
+
+Get documentation AND code analysis together using `--include-code`:
+
+### CLI
+
+```bash
+# Get docs with code analysis summary
+repo-ctx repo docs /owner/repo --include-code
+
+# With token limit
+repo-ctx repo docs /owner/repo --include-code --max-tokens 10000
+
+# JSON output
+repo-ctx -o json repo docs /owner/repo --include-code
+```
+
+### MCP Tool
+
+```javascript
+// Get documentation with code analysis
+await mcp.call("repo-ctx-docs", {
+  libraryId: "/owner/repo",
+  maxTokens: 10000,
+  includeCodeAnalysis: true
+});
+```
+
+The code analysis section includes:
+- **Symbol Summary**: Count of classes, functions, methods, interfaces by language
+- **Class Hierarchy**: Mermaid diagram showing inheritance relationships
+- **Top-Level API**: Public classes and functions with signatures
+- **Dependency Overview**: Key import relationships
+
+---
+
+## Complete Information Summary
+
+### Available Information Types
+
+| Category | Information | CLI | MCP | Library API |
+|----------|-------------|-----|-----|-------------|
+| **Documentation** | README, guides, API docs | `repo docs` | `repo-ctx-docs` | `get_documentation()` |
+| **Repository Metadata** | Name, description, versions | `repo list` | `repo-ctx-list` | `list_all_libraries()` |
+| **Code Symbols** | Classes, functions, methods | `code analyze` | `repo-ctx-analyze` | `analyze_file()` |
+| **Symbol Search** | Find by name/pattern | `code find` | `repo-ctx-search-symbol` | `find_symbols()` |
+| **Symbol Details** | Signature, docs, location | `code info` | `repo-ctx-get-symbol-detail` | `find_symbol()` |
+| **File Symbols** | All symbols in a file | `code symbols` | `repo-ctx-get-file-symbols` | `analyze_file()` |
+| **Dependencies** | Import/call relationships | `code dep` | `repo-ctx-dependency-graph` | `extract_dependencies()` |
+| **Dependency Graph** | Visual graph (DOT/GraphML) | `code dep --format dot` | `repo-ctx-dependency-graph` | `DependencyGraph.build()` |
+
+### Symbol Types Extracted
+
+| Type | Python | JavaScript | TypeScript | Java | Kotlin |
+|------|--------|------------|------------|------|--------|
+| Class | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Function | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Method | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Interface | - | - | ✓ | ✓ | ✓ |
+| Enum | ✓ | - | ✓ | ✓ | ✓ |
+
+### Dependency/Relationship Types
+
+| Relation | Description | Graph Types |
+|----------|-------------|-------------|
+| `imports` | Module/file imports | file, module |
+| `inherits` | Class inheritance | class, symbol |
+| `implements` | Interface implementation | class, symbol |
+| `contains` | Containment (class→method) | symbol |
+| `calls` | Function/method calls | function, symbol |
+
+### Output Formats by Command
+
+| Command | text | json | yaml | dot | graphml |
+|---------|------|------|------|-----|---------|
+| `repo docs` | ✓ | ✓ | ✓ | - | - |
+| `code analyze` | ✓ | ✓ | ✓ | - | - |
+| `code find` | ✓ | ✓ | ✓ | - | - |
+| `code info` | ✓ | ✓ | ✓ | - | - |
+| `code symbols` | ✓ | ✓ | ✓ | - | - |
+| `code dep` | - | ✓ | - | ✓ | ✓ |
+
+### Data Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         repo-ctx                                 │
+├─────────────────────────────────────────────────────────────────┤
+│  Providers          │  Analysis           │  Storage            │
+│  ─────────          │  ────────           │  ───────            │
+│  • GitHub           │  • PythonExtractor  │  • SQLite DB        │
+│  • GitLab           │  • JavaScriptExtr.  │  • FTS5 Search      │
+│  • Local Git        │  • JavaExtractor    │  • Symbol Index     │
+│                     │  • KotlinExtractor  │  • Doc Index        │
+│                     │  • DependencyGraph  │                     │
+├─────────────────────────────────────────────────────────────────┤
+│  Interfaces                                                      │
+│  ──────────                                                      │
+│  • CLI (Interactive/Batch)                                       │
+│  • MCP Server (11 tools)                                         │
+│  • Python Library API                                            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### MCP Tools Summary (11 tools)
+
+| # | Tool | Category | Key Parameters |
+|---|------|----------|----------------|
+| 1 | `repo-ctx-search` | Repo | `libraryName` |
+| 2 | `repo-ctx-fuzzy-search` | Repo | `query`, `limit` |
+| 3 | `repo-ctx-index` | Repo | `repository`, `provider` |
+| 4 | `repo-ctx-index-group` | Repo | `group`, `includeSubgroups` |
+| 5 | `repo-ctx-list` | Repo | `provider` |
+| 6 | `repo-ctx-docs` | Repo | `libraryId`, `maxTokens`, `includeCodeAnalysis` |
+| 7 | `repo-ctx-analyze` | Code | `path`, `repoId`, `language`, `symbolType` |
+| 8 | `repo-ctx-search-symbol` | Code | `path`, `repoId`, `query`, `symbolType` |
+| 9 | `repo-ctx-get-symbol-detail` | Code | `path`, `repoId`, `symbolName` |
+| 10 | `repo-ctx-get-file-symbols` | Code | `filePath`, `groupByType` |
+| 11 | `repo-ctx-dependency-graph` | Code | `path`, `repoId`, `graphType`, `outputFormat` |

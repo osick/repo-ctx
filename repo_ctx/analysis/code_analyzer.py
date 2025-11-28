@@ -91,13 +91,14 @@ class CodeAnalyzer:
 
         return results
 
-    def extract_dependencies(self, code: str, file_path: str) -> List[Dict[str, Any]]:
+    def extract_dependencies(self, code: str, file_path: str, symbols: Optional[List[Symbol]] = None) -> List[Dict[str, Any]]:
         """
         Extract dependencies from a file.
 
         Args:
             code: Source code content
             file_path: Path to the file
+            symbols: Optional list of symbols to extract function calls from
 
         Returns:
             List of dependency dictionaries
@@ -108,7 +109,7 @@ class CodeAnalyzer:
             return []
 
         if language == "python":
-            return self.python_extractor.extract_dependencies(code, file_path)
+            return self.python_extractor.extract_dependencies(code, file_path, symbols)
         elif language in ["javascript", "typescript"]:
             extractor = self.javascript_extractor if language == "javascript" else self.typescript_extractor
             return extractor.extract_dependencies(code, file_path)
