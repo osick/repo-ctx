@@ -123,10 +123,10 @@ Run 'repo-ctx <command> --help' for command details.
     repo_docs.add_argument("--topic", "-t", help="Filter by topic")
     repo_docs.add_argument("--max-tokens", type=int, help="Maximum tokens to return")
     repo_docs.add_argument("--page", type=int, default=1, help="Page number (default: 1)")
-    repo_docs.add_argument("--include-code", action="store_true",
-                          help="Include code analysis summary (symbols, hierarchy, dependencies)")
-    repo_docs.add_argument("--exclude-tests", action="store_true",
-                          help="Exclude test classes/functions from code analysis output")
+    repo_docs.add_argument("--include", "-I",
+                          help="Include additional content (comma-separated): "
+                               "code (structure), symbols (detailed info), diagrams (mermaid), "
+                               "tests (include test code), examples (all doc snippets), all")
     repo_docs.add_argument("--refresh", action="store_true",
                           help="Force re-analysis of code (ignore cached symbols)")
 
@@ -152,7 +152,6 @@ Run 'repo-ctx <command> --help' for command details.
     code_analyze.add_argument("--type", "-t", choices=["function", "class", "method", "interface", "enum"],
                               help="Filter by symbol type")
     code_analyze.add_argument("--deps", action="store_true", help="Show dependencies")
-    code_analyze.add_argument("--callgraph", action="store_true", help="Show call graph")
 
     # code find
     code_find = code_subparsers.add_parser(

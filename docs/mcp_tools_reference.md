@@ -402,6 +402,22 @@ When you specify a provider filter, only repositories matching that provider wil
 | `topic` | string | ❌ No | - | Filter by topic (matches file path) |
 | `maxTokens` | integer | ❌ No | - | **Recommended:** Maximum tokens to return (e.g., 8000 for most models, 50000 for long-context models). If specified, `page` is ignored. |
 | `page` | integer | ❌ No | 1 | Page number for pagination (ignored if `maxTokens` is specified) |
+| `include` | array | ❌ No | - | Additional content to include (see table below) |
+| `includeMetadata` | boolean | ❌ No | false | Include quality scores and document metadata |
+| `refresh` | boolean | ❌ No | false | Force re-analysis of code (ignore cache) |
+
+### Include Options
+
+The `include` parameter accepts an array of strings to control what additional content is included:
+
+| Option | Description |
+|--------|-------------|
+| `code` | Code structure: classes, functions, modules (compact view) |
+| `symbols` | Detailed symbol info: full docstrings, signatures, parameters |
+| `diagrams` | Mermaid diagrams: class hierarchy, call graph, import dependencies |
+| `tests` | Include test classes/functions in code analysis (excluded by default) |
+| `examples` | Include ALL code examples from docs (override smart filtering of pip/docker commands) |
+| `all` | Enable all options above |
 
 ### Token-Based vs Page-Based Retrieval
 
@@ -463,6 +479,26 @@ await use_mcp_tool("repo-ctx", "repo-ctx-docs", {
   libraryId: "/mygroup/myproject/v1.0.0",
   topic: "tutorial",
   page: 1
+});
+
+// Include code structure and diagrams (replaces old includeCodeAnalysis)
+await use_mcp_tool("repo-ctx", "repo-ctx-docs", {
+  libraryId: "/mygroup/myproject",
+  include: ["code", "diagrams"]
+});
+
+// Full analysis including tests
+await use_mcp_tool("repo-ctx", "repo-ctx-docs", {
+  libraryId: "/mygroup/myproject",
+  include: ["all"],
+  refresh: true  // Force re-analysis
+});
+
+// Detailed symbols with diagrams (no tests)
+await use_mcp_tool("repo-ctx", "repo-ctx-docs", {
+  libraryId: "/mygroup/myproject",
+  include: ["symbols", "diagrams"],
+  maxTokens: 50000
 });
 ```
 

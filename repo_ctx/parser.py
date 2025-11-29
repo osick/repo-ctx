@@ -17,6 +17,47 @@ class Parser:
             r"^The following\s+",
             r"^In this (document|guide|page|section),?\s+",
         ]
+
+        # Low-value code snippet patterns (installation commands, etc.)
+        self.low_value_code_patterns = [
+            # Package managers
+            r'^\s*(pip|pip3)\s+install',
+            r'^\s*npm\s+(install|i)\s',
+            r'^\s*yarn\s+(add|install)',
+            r'^\s*pnpm\s+(add|install)',
+            r'^\s*brew\s+install',
+            r'^\s*apt(-get)?\s+install',
+            r'^\s*conda\s+install',
+            r'^\s*poetry\s+add',
+            # Docker commands
+            r'^\s*docker\s+(run|pull|build|compose)',
+            r'^\s*docker-compose\s+',
+            # Git commands (simple ones)
+            r'^\s*git\s+(clone|pull|push)\s',
+            # Simple shell commands
+            r'^\s*cd\s+',
+            r'^\s*mkdir\s+',
+            r'^\s*export\s+\w+=',
+            # Virtual environment
+            r'^\s*(python|python3)\s+-m\s+venv',
+            r'^\s*source\s+.*activate',
+            r'^\s*\.\s+.*activate',
+        ]
+
+        # High-priority document patterns (should include full content)
+        self.high_priority_docs = [
+            'readme.md', 'readme.rst', 'readme.txt', 'readme',
+            'index.md', 'index.rst',
+            'overview.md', 'introduction.md', 'getting-started.md',
+            'architecture.md', 'design.md',
+        ]
+
+        # Low-priority document patterns (minimal content)
+        self.low_priority_docs = [
+            'install', 'installation', 'setup',
+            'contributing', 'code_of_conduct', 'codeofconduct',
+            'security', 'support',
+        ]
     
     def should_include_file(self, path: str, config: Optional[dict] = None) -> bool:
         """Check if file should be included based on config."""
@@ -43,7 +84,115 @@ class Parser:
             return any(f"/{folder}/" in path or path.startswith(f"{folder}/") for folder in folders)
         
         return True
-    
+
+    def get_document_priority(self, file_path: str) -> str:
+        """
+        Classify document priority based on file path.
+
+        Returns:
+            'high': README, index, architecture docs - include full content
+            'normal': API docs, guides - standard processing
+            'low': Installation, contributing - minimal content
+        """
+        filename = file_path.lower().split('/')[-1]
+        path_lower = file_path.lower()
+
+        # Check high priority
+        for pattern in self.high_priority_docs:
+            if filename == pattern or filename.startswith(pattern.replace('.md', '')):
+                return 'high'
+
+        # Check low priority
+        for pattern in self.low_priority_docs:
+            if pattern in filename:
+                return 'low'
+
+        # API and reference docs are normal priority
+        if '/api/' in path_lower or '/reference/' in path_lower:
+            return 'normal'
+
+        return 'normal'
+
+    def is_low_value_snippet(self, code: str, language: str) -> bool:
+        """
+        Check if a code snippet is low-value (installation commands, etc.).
+
+        Args:
+            code: The code content
+            language: The language identifier (bash, shell, etc.)
+
+        Returns:
+            True if this is a low-value snippet that should be filtered
+        """
+        # Only filter shell/bash snippets
+        if language not in ('bash', 'shell', 'sh', 'console', 'text', ''):
+            return False
+
+        # Check each line against low-value patterns
+        lines = code.strip().split('\n')
+
+        # If it's a one-liner or two-liner, check if it's a simple command
+        if len(lines) <= 2:
+            for line in lines:
+                line = line.strip()
+                # Skip comment lines and empty lines
+                if not line or line.startswith('#'):
+                    continue
+                # Remove common prompt prefixes
+                line = re.sub(r'^[\$\>]\s*', '', line)
+
+                for pattern in self.low_value_code_patterns:
+                    if re.match(pattern, line, re.IGNORECASE):
+                        return True
+
+        return False
+
+    def filter_valuable_snippets(self, snippets: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """
+        Filter code snippets to keep only valuable ones.
+
+        Args:
+            snippets: List of snippet dicts with 'context', 'language', 'code'
+
+        Returns:
+            Filtered list with low-value snippets removed
+        """
+        return [s for s in snippets if not self.is_low_value_snippet(s['code'], s['language'])]
+
+    def extract_full_content(self, content: str) -> str:
+        """
+        Extract full content from a document, cleaning up noise.
+
+        Used for high-priority documents like README.
+
+        Args:
+            content: Full markdown content
+
+        Returns:
+            Cleaned content with badges and noise removed
+        """
+        lines = content.split('\n')
+        cleaned_lines = []
+        skip_badges = True  # Skip badge section at top
+
+        for line in lines:
+            # Skip badge lines (markdown images at top of file)
+            if skip_badges:
+                if re.match(r'^\s*(\[!\[|<img|<a href=.*badge)', line):
+                    continue
+                elif line.strip() == '':
+                    continue
+                else:
+                    skip_badges = False
+
+            # Skip standalone badge lines anywhere
+            if re.match(r'^\s*\[!\[.*\]\(.*\)\]\(.*\)\s*$', line):
+                continue
+
+            cleaned_lines.append(line)
+
+        return '\n'.join(cleaned_lines)
+
     def parse_markdown(self, content: str) -> str:
         """Parse markdown and return formatted content."""
         # For MVP, just return content as-is
@@ -429,22 +578,32 @@ class Parser:
             "word_count": word_count
         }
 
-    def format_for_llm(self, documents: list, library_id: str) -> str:
+    def format_for_llm(self, documents: list, library_id: str, include_examples: bool = False) -> str:
         """
-        Format documents for LLM consumption with enhanced structure.
+        Format documents for LLM consumption with priority-based content handling.
 
-        Uses Context7-inspired format: brief, structured, code-focused.
+        High-priority docs (README, architecture): Full content with badge/noise removal
+        Normal docs (API, guides): Structured extraction with filtered code snippets
+        Low-priority docs (install, contributing): Skip or minimal content
 
         Args:
             documents: List of Document objects
             library_id: Library identifier
+            include_examples: If True, include all code examples without filtering
 
         Returns:
             Formatted markdown optimized for LLM parsing
         """
         output = []
 
-        for doc in documents:
+        # Sort documents by priority (high first)
+        def priority_sort_key(doc):
+            p = self.get_document_priority(doc.file_path)
+            return {'high': 0, 'normal': 1, 'low': 2}.get(p, 1)
+
+        sorted_docs = sorted(documents, key=priority_sort_key)
+
+        for doc in sorted_docs:
             # Skip excluded files
             if self.should_exclude_file(doc.file_path):
                 continue
@@ -453,33 +612,69 @@ class Parser:
             if len(doc.content.strip()) < 100:
                 continue
 
-            # Extract structured content
+            priority = self.get_document_priority(doc.file_path)
             title = self.extract_title(doc.content, doc.file_path)
-            description = self.extract_description(doc.content)
-            snippets = self.extract_snippets_with_context(doc.content)
 
-            # Skip if no useful content (no description and no code)
-            if not description and not snippets:
+            if priority == 'high':
+                # High priority: Include full content with noise removed
+                full_content = self.extract_full_content(doc.content)
+
+                # Filter out low-value code snippets unless include_examples is set
+                if not include_examples:
+                    def replace_low_value_blocks(match):
+                        lang = match.group(1) or ''
+                        code = match.group(2)
+                        if self.is_low_value_snippet(code, lang):
+                            return ''  # Remove low-value snippets
+                        return match.group(0)  # Keep valuable ones
+
+                    full_content = re.sub(
+                        r'```(\w*)\n(.*?)```',
+                        replace_low_value_blocks,
+                        full_content,
+                        flags=re.DOTALL
+                    )
+
+                # Clean up multiple consecutive blank lines
+                full_content = re.sub(r'\n{3,}', '\n\n', full_content)
+
+                output.append(f"# {doc.file_path}\n\n")
+                output.append(full_content.strip())
+                output.append("\n\n---\n\n")
+
+            elif priority == 'normal':
+                # Normal priority: Structured extraction with filtered snippets
+                description = self.extract_description(doc.content, max_sentences=5)
+                snippets = self.extract_snippets_with_context(doc.content)
+
+                # Filter snippets unless include_examples is set
+                if include_examples:
+                    valuable_snippets = snippets
+                else:
+                    valuable_snippets = self.filter_valuable_snippets(snippets)
+
+                # Skip if no useful content
+                if not description and not valuable_snippets:
+                    continue
+
+                output.append(f"# {doc.file_path} - {title}\n\n")
+
+                if description:
+                    output.append(f"{description}\n\n")
+
+                if valuable_snippets:
+                    output.append("## Code Examples\n\n")
+                    for snippet in valuable_snippets[:5]:  # Limit to 5 examples
+                        output.append(f"### {snippet['context']}\n")
+                        output.append(f"```{snippet['language']}\n")
+                        output.append(snippet['code'])
+                        output.append("\n```\n\n")
+
+                output.append("---\n\n")
+
+            else:  # low priority
+                # Low priority: Skip entirely or include just a brief note
+                # For now, skip low-priority docs to save tokens
                 continue
-
-            # Format document
-            output.append(f"# {doc.file_path} - {title}\n\n")
-
-            # Add description if available
-            if description:
-                output.append(f"{description}\n\n")
-
-            # Add code examples if available
-            if snippets:
-                output.append("## Code Examples\n\n")
-
-                for snippet in snippets:
-                    output.append(f"### {snippet['context']}\n")
-                    output.append(f"```{snippet['language']}\n")
-                    output.append(snippet['code'])
-                    output.append("\n```\n\n")
-
-            # Separator between documents
-            output.append("---\n\n")
 
         return "".join(output)

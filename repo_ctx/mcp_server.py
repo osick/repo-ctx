@@ -86,11 +86,30 @@ async def get_or_analyze_repo(context: GitLabContext, repo_id: str, force_refres
 
     def analyze_local_directory(repo_path: str, analyzer) -> dict:
         """Analyze all code files in a local directory."""
+        # Directories to skip (virtual envs, caches, build artifacts)
+        skip_dirs = {
+            '.git', '.venv', 'venv', 'env', '.env',
+            'node_modules', '__pycache__', '.pytest_cache',
+            '.mypy_cache', '.ruff_cache', '.tox',
+            'dist', 'build', 'egg-info', '.eggs',
+            'htmlcov', '.coverage', 'coverage',
+            '.idea', '.vscode', '.vs',
+            'vendor', 'third_party', 'external',
+            'tests', 'test', 'spec', 'specs', '__tests__'
+        }
+
         files = {}
         for root, dirs, filenames in os.walk(repo_path):
-            if '.git' in dirs:
-                dirs.remove('.git')
+            # Remove directories we want to skip
+            dirs[:] = [d for d in dirs if d not in skip_dirs and not d.endswith('.egg-info')]
+
             for filename in filenames:
+                # Skip test files
+                if filename.startswith('test_') or filename.endswith('_test.py'):
+                    continue
+                if filename.startswith('spec_') or filename.endswith('.spec.js'):
+                    continue
+
                 full_path = os.path.join(root, filename)
                 rel_path = os.path.relpath(full_path, repo_path)
                 if analyzer.detect_language(rel_path):
@@ -303,19 +322,14 @@ async def serve(
                             "description": "Include quality scores, document types, and metadata in response (default: false)",
                             "default": False
                         },
-                        "includeCodeAnalysis": {
-                            "type": "boolean",
-                            "description": "Include code analysis summary with symbol statistics, class hierarchy (mermaid), and public API overview (default: false)",
-                            "default": False
+                        "include": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Additional content to include. Options: 'code' (structure), 'symbols' (detailed info), 'diagrams' (mermaid), 'tests' (include test code), 'examples' (all doc snippets), 'all'. Example: ['code', 'diagrams']"
                         },
-                        "refreshCodeAnalysis": {
+                        "refresh": {
                             "type": "boolean",
                             "description": "Force re-analysis of code (ignore cached symbols). Use when class hierarchy is missing edges. (default: false)",
-                            "default": False
-                        },
-                        "excludeTests": {
-                            "type": "boolean",
-                            "description": "Exclude test classes/functions from code analysis output (default: false)",
                             "default": False
                         }
                     },
@@ -618,16 +632,29 @@ async def serve(
             page = arguments.get("page", 1)
             max_tokens = arguments.get("maxTokens")
             include_metadata = arguments.get("includeMetadata", False)
-            include_code_analysis = arguments.get("includeCodeAnalysis", False)
-            refresh_code_analysis = arguments.get("refreshCodeAnalysis", False)
-            exclude_tests = arguments.get("excludeTests", False)
+            refresh = arguments.get("refresh", False)
+
+            # Parse include options (array of strings)
+            include_list = arguments.get("include", [])
+            include_opts = set(opt.lower() for opt in include_list) if include_list else set()
+
+            # Handle 'all' option
+            if 'all' in include_opts:
+                include_opts = {'code', 'symbols', 'diagrams', 'tests', 'examples'}
+
+            include_code = 'code' in include_opts
+            include_symbols = 'symbols' in include_opts
+            include_diagrams = 'diagrams' in include_opts
+            include_tests = 'tests' in include_opts
+            include_examples = 'examples' in include_opts
 
             try:
                 result = await context.get_documentation(
                     library_id,
                     topic,
                     page,
-                    max_tokens=max_tokens
+                    max_tokens=max_tokens,
+                    include_examples=include_examples
                 )
 
                 # Build response text
@@ -650,17 +677,23 @@ async def serve(
                         response_text += f"  - Reading Time: {doc_meta['reading_time']} min\n"
                         response_text += f"  - Code Examples: {doc_meta['snippet_count']}\n"
 
-                # Optionally append code analysis
-                if include_code_analysis:
+                # Optionally append code analysis if any code-related options set
+                needs_code_analysis = include_code or include_symbols or include_diagrams
+                if needs_code_analysis:
                     from .analysis import CodeAnalysisReport
 
                     # Get symbols for the repository (refresh if requested)
-                    symbols, lib, error = await get_or_analyze_repo(context, library_id, force_refresh=refresh_code_analysis)
+                    symbols, lib, error = await get_or_analyze_repo(context, library_id, force_refresh=refresh)
 
                     if not error and symbols:
-                        # Generate code analysis report (optionally excluding tests)
-                        report = CodeAnalysisReport(symbols, exclude_tests=exclude_tests)
-                        markdown_report = report.generate_markdown(include_mermaid=True)
+                        # Generate code analysis report with options
+                        # Tests excluded by default unless 'tests' in include options
+                        report = CodeAnalysisReport(symbols, exclude_tests=not include_tests)
+                        markdown_report = report.generate_markdown(
+                            include_code=include_code,
+                            include_symbols=include_symbols,
+                            include_mermaid=include_diagrams
+                        )
                         response_text += f"\n\n---\n\n{markdown_report}"
 
                 return [TextContent(type="text", text=response_text)]

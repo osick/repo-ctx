@@ -48,7 +48,7 @@ uv pip install -e .
 
 ## MCP Tools Overview
 
-repo-ctx provides **10 MCP tools** for seamless integration with AI assistants like Claude Code, Kiro CLI, and GitHub Copilot.
+repo-ctx provides **11 MCP tools** for seamless integration with AI assistants like Claude Code, Kiro CLI, and GitHub Copilot.
 
 ### Workflow Diagram
 

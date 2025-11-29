@@ -220,7 +220,8 @@ class RepositoryContext:
         library_id: str,
         topic: Optional[str] = None,
         page: int = 1,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        include_examples: bool = False
     ) -> dict:
         """
         Get documentation for a library.
@@ -230,6 +231,7 @@ class RepositoryContext:
             topic: Optional topic filter
             page: Page number for pagination (ignored if max_tokens specified)
             max_tokens: Maximum tokens to return (preferred over page-based)
+            include_examples: If True, include all code examples (override smart filtering)
 
         Returns:
             Documentation content and metadata
@@ -245,27 +247,50 @@ class RepositoryContext:
             # Legacy format: /group/project
             parts = library_id.strip("/").split("/")
 
-        if len(parts) < 2:
-            raise ValueError(f"Invalid library_id: {library_id}")
+        # Detect if this is a local path (absolute path like /home/... or /usr/...)
+        # Local paths are stored with full path as group_name and empty project_name
+        is_local_path = library_id.startswith("/") and (
+            library_id.startswith("/home/") or
+            library_id.startswith("/usr/") or
+            library_id.startswith("/opt/") or
+            library_id.startswith("/tmp/") or
+            library_id.startswith("/var/") or
+            library_id.startswith("/mnt/") or
+            library_id.startswith("/media/") or
+            # Check if it looks like a file path (has more than 3 parts starting with common dirs)
+            (len(parts) > 3 and parts[0] in ('home', 'usr', 'opt', 'tmp', 'var', 'mnt', 'media', 'root'))
+        )
 
-        # Check if last part is a version (exists in versions table)
-        # For now, assume last part is project, second-to-last might be version
-        # Simple heuristic: if we have more than 2 parts, last could be version
-        project = parts[-1]
-        group = "/".join(parts[:-1])
-        version = None
+        if is_local_path:
+            # Local repository: stored with full path as group, empty project
+            group = library_id.rstrip("/")
+            project = ""
+            version = None
+            library = await self.storage.get_library(group, project)
+        else:
+            if len(parts) < 2:
+                raise ValueError(f"Invalid library_id: {library_id}")
 
-        # Try to get library with full path first
-        library = await self.storage.get_library(group, project)
+            # Check if last part is a version (exists in versions table)
+            # For now, assume last part is project, second-to-last might be version
+            # Simple heuristic: if we have more than 2 parts, last could be version
+            project = parts[-1]
+            group = "/".join(parts[:-1])
+            version = None
 
-        # If not found and we have 3+ parts, try treating last as version
-        if not library and len(parts) >= 3:
+            # Try to get library with full path first
+            library = await self.storage.get_library(group, project)
+
+        # If not found and we have 3+ parts, try treating last as version (not for local paths)
+        if not library and not is_local_path and len(parts) >= 3:
             version = parts[-1]
             project = parts[-2]
             group = "/".join(parts[:-2])
             library = await self.storage.get_library(group, project)
 
         if not library:
+            if is_local_path:
+                raise ValueError(f"Library not found: {group} (local). Did you index it first with 'repo-ctx -p local repo index {group}'?")
             raise ValueError(f"Library not found: {group}/{project}")
 
         # Use default version if not specified
@@ -295,7 +320,7 @@ class RepositoryContext:
 
             for doc in documents:
                 # Format this single document
-                single_doc_content = self.parser.format_for_llm([doc], library_id)
+                single_doc_content = self.parser.format_for_llm([doc], library_id, include_examples=include_examples)
                 doc_tokens = self.parser.count_tokens(single_doc_content)
 
                 # Check if adding this document would exceed limit
@@ -311,7 +336,7 @@ class RepositoryContext:
                     break  # Stop when limit reached
 
             # Format the selected documents
-            content = self.parser.format_for_llm(formatted_docs, library_id)
+            content = self.parser.format_for_llm(formatted_docs, library_id, include_examples=include_examples)
             actual_tokens = self.parser.count_tokens(content)
 
             metadata = {
@@ -325,7 +350,7 @@ class RepositoryContext:
             }
         else:
             # Page-based: format all retrieved documents
-            content = self.parser.format_for_llm(documents, library_id)
+            content = self.parser.format_for_llm(documents, library_id, include_examples=include_examples)
             actual_tokens = self.parser.count_tokens(content)
 
             # Extract metadata for all documents

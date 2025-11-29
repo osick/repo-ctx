@@ -271,6 +271,7 @@ COMMANDS = [
     {"name": "code find", "desc": "Find symbols by name pattern", "category": "Code"},
     {"name": "code info", "desc": "Get detailed symbol information", "category": "Code"},
     {"name": "code symbols", "desc": "List all symbols in a file", "category": "Code"},
+    {"name": "code dep", "desc": "Generate dependency graph", "category": "Code"},
     # Config commands
     {"name": "config show", "desc": "Show current configuration", "category": "Config"},
     # Special
@@ -507,11 +508,48 @@ async def execute_repo_docs():
         style=custom_style
     ).ask_async()
 
+    # Ask for max tokens
+    max_tokens_str = await questionary.text(
+        "Max tokens (default: 8000, press Enter to use default):",
+        default="8000",
+        style=custom_style
+    ).ask_async()
+
+    try:
+        max_tokens = int(max_tokens_str) if max_tokens_str else 8000
+    except ValueError:
+        max_tokens = 8000
+
+    # Ask for include options
+    include_choices = await questionary.checkbox(
+        "Include additional content (space to select, enter to confirm):",
+        choices=[
+            questionary.Choice("code - Code structure (classes, functions)", value="code"),
+            questionary.Choice("symbols - Detailed symbol info (docstrings, signatures)", value="symbols"),
+            questionary.Choice("diagrams - Mermaid diagrams (hierarchy, call graph)", value="diagrams"),
+            questionary.Choice("tests - Include test code in analysis", value="tests"),
+            questionary.Choice("examples - All doc code examples (incl. install commands)", value="examples"),
+        ],
+        style=custom_style
+    ).ask_async()
+
+    include_opts = set(include_choices) if include_choices else set()
+
+    # Ask for refresh if any code options selected
+    force_refresh = False
+    if include_opts & {'code', 'symbols', 'diagrams'}:
+        force_refresh = await questionary.confirm(
+            "Force refresh code analysis?",
+            default=False,
+            style=custom_style
+        ).ask_async()
+
     console.print(f"\n[cyan]Fetching documentation for {repo_id}...[/cyan]\n")
 
     try:
         from ..config import Config
         from ..core import GitLabContext
+        from ..analysis import CodeAnalysisReport
 
         config = Config.load()
         context = GitLabContext(config)
@@ -520,10 +558,26 @@ async def execute_repo_docs():
         result = await context.get_documentation(
             repo_id,
             topic=topic if topic else None,
-            max_tokens=8000
+            max_tokens=max_tokens,
+            include_examples='examples' in include_opts
         )
 
         content = result["content"][0]["text"]
+
+        # Append code analysis if requested
+        needs_code_analysis = include_opts & {'code', 'symbols', 'diagrams'}
+        if needs_code_analysis:
+            symbols, lib, error = await get_or_analyze_repo(repo_id, force_refresh=force_refresh)
+
+            if not error and symbols:
+                report = CodeAnalysisReport(symbols, exclude_tests='tests' not in include_opts)
+                markdown_report = report.generate_markdown(
+                    include_code='code' in include_opts,
+                    include_symbols='symbols' in include_opts,
+                    include_mermaid='diagrams' in include_opts
+                )
+                content += f"\n\n---\n\n{markdown_report}"
+
         console.print(Panel(content[:2000] + "..." if len(content) > 2000 else content, title=repo_id))
 
     except Exception as e:
@@ -1197,6 +1251,184 @@ async def execute_code_symbols():
         print_error(e)
 
 
+async def execute_code_dep():
+    """Execute code dep command."""
+    # Ask for source type
+    source_type = await questionary.select(
+        "Generate dependency graph from:",
+        choices=[
+            questionary.Choice("Local path", value="local"),
+            questionary.Choice("Indexed repository", value="indexed"),
+        ],
+        style=custom_style
+    ).ask_async()
+
+    if not source_type:
+        console.print("[yellow]Cancelled[/yellow]")
+        return
+
+    path = ""
+    repo_id = ""
+
+    if source_type == "indexed":
+        indexed_repos = await get_indexed_repos()
+        if not indexed_repos:
+            console.print("[yellow]No repositories indexed yet.[/yellow]")
+            console.print("[dim]Use 'repo index' to index a repository first.[/dim]")
+            return
+
+        repo_id = await questionary.select(
+            "Select repository:",
+            choices=indexed_repos,
+            style=custom_style
+        ).ask_async()
+
+        if not repo_id:
+            console.print("[yellow]Cancelled[/yellow]")
+            return
+    else:
+        path = await questionary.text(
+            "Path to analyze:",
+            default=".",
+            style=custom_style
+        ).ask_async()
+
+        if not path:
+            console.print("[yellow]Cancelled[/yellow]")
+            return
+
+    # Ask for graph type
+    graph_type = await questionary.select(
+        "Graph type:",
+        choices=[
+            questionary.Choice("class - Class inheritance and composition", value="class"),
+            questionary.Choice("function - Function/method call graph", value="function"),
+            questionary.Choice("file - File-level import dependencies", value="file"),
+            questionary.Choice("module - Module/package dependencies", value="module"),
+            questionary.Choice("symbol - Complete symbol graph", value="symbol"),
+        ],
+        default="class",
+        style=custom_style
+    ).ask_async()
+
+    # Ask for output format
+    output_format = await questionary.select(
+        "Output format:",
+        choices=[
+            questionary.Choice("json - JSON Graph Format (structured)", value="json"),
+            questionary.Choice("dot - GraphViz DOT (for visualization)", value="dot"),
+            questionary.Choice("graphml - GraphML XML (for analysis tools)", value="graphml"),
+        ],
+        default="json",
+        style=custom_style
+    ).ask_async()
+
+    source_name = repo_id or path
+    console.print(f"\n[cyan]Generating {graph_type} dependency graph for {source_name}...[/cyan]")
+
+    try:
+        from pathlib import Path
+        from ..analysis import CodeAnalyzer, DependencyGraph, GraphType
+
+        analyzer = CodeAnalyzer()
+        graph_builder = DependencyGraph()
+        all_symbols = []
+        all_dependencies = []
+
+        # Map graph type
+        graph_type_map = {
+            "file": GraphType.FILE,
+            "module": GraphType.MODULE,
+            "class": GraphType.CLASS,
+            "function": GraphType.FUNCTION,
+            "symbol": GraphType.SYMBOL
+        }
+        gt = graph_type_map.get(graph_type, GraphType.CLASS)
+
+        if repo_id:
+            # Use indexed repository
+            symbols, lib, error = await get_or_analyze_repo(repo_id)
+
+            if error:
+                print_error(error)
+                return
+
+            if not symbols:
+                console.print(f"[yellow]No symbols found in {repo_id}[/yellow]")
+                return
+
+            all_symbols = symbols
+        else:
+            # Use local path
+            path_obj = Path(path)
+
+            if not path_obj.exists():
+                console.print(f"[red]Error: Path '{path}' does not exist[/red]")
+                return
+
+            # Collect files
+            files = {}
+            if path_obj.is_file():
+                if analyzer.detect_language(str(path_obj)):
+                    with open(path_obj, 'r', encoding='utf-8') as f:
+                        files[str(path_obj)] = f.read()
+            else:
+                for root, dirs, filenames in os.walk(path_obj):
+                    # Skip common non-code directories
+                    dirs[:] = [d for d in dirs if d not in
+                              {'.git', '.venv', 'venv', 'node_modules', '__pycache__',
+                               'build', 'dist', '.pytest_cache', '.mypy_cache'}]
+                    for filename in filenames:
+                        file_path = os.path.join(root, filename)
+                        if analyzer.detect_language(filename):
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    files[file_path] = f.read()
+                            except (UnicodeDecodeError, PermissionError):
+                                continue
+
+            if not files:
+                console.print(f"[yellow]No supported files found in {path}[/yellow]")
+                return
+
+            # Analyze files
+            results = analyzer.analyze_files(files)
+            all_symbols = analyzer.aggregate_symbols(results)
+
+            # Extract dependencies
+            for file_path, code in files.items():
+                file_symbols = results.get(file_path, [])
+                deps = analyzer.extract_dependencies(code, file_path, file_symbols)
+                all_dependencies.extend(deps)
+
+        # Build the graph
+        result = graph_builder.build(
+            symbols=all_symbols,
+            dependencies=all_dependencies,
+            graph_type=gt,
+            graph_id=source_name,
+            graph_label=f"Dependency Graph: {source_name}",
+        )
+
+        # Format output
+        if output_format == "dot":
+            output = graph_builder.to_dot(result)
+        elif output_format == "graphml":
+            output = graph_builder.to_graphml(result)
+        else:
+            output = graph_builder.to_json(result)
+
+        # Display (truncated for long output)
+        if len(output) > 3000:
+            console.print(Panel(output[:3000] + "\n...[truncated]", title=f"{graph_type} Dependency Graph"))
+            console.print(f"[dim]Full output is {len(output)} characters. Use CLI for full output.[/dim]")
+        else:
+            console.print(Panel(output, title=f"{graph_type} Dependency Graph"))
+
+    except Exception as e:
+        print_error(e)
+
+
 async def execute_config_show():
     """Execute config show command."""
     console.print("\n[cyan]Current Configuration[/cyan]\n")
@@ -1263,6 +1495,7 @@ async def execute_command(cmd: str):
         "code find": execute_code_find,
         "code info": execute_code_info,
         "code symbols": execute_code_symbols,
+        "code dep": execute_code_dep,
         "config show": execute_config_show,
     }
 

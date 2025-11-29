@@ -296,10 +296,10 @@ class TestParserFormatForLLM:
 
         result = self.parser.format_for_llm([doc], "/group/project")
 
-        # New format: # {file_path} - {title}
-        assert "# README.md - Hello World" in result
+        # README is high-priority: gets full content with file path header
+        assert "# README.md" in result
+        assert "# Hello World" in result  # Original title preserved in content
         assert "demonstrates formatting" in result
-        assert "## Code Examples" in result
         assert "```python" in result
 
     def test_format_for_llm_multiple_documents(self):
@@ -348,6 +348,83 @@ class TestParserFormatForLLM:
         assert "```python" in result
         assert "code" in result
         assert "## Code Examples" in result
+
+    def test_format_for_llm_filters_low_value_snippets(self):
+        """Test that low-value installation commands are filtered."""
+        doc = Document(
+            version_id=1,
+            file_path="guide.md",
+            content="# Guide\n\nLearn how to use this library. First install it, then import it.\n\n```bash\npip install mylib\n```\n\n```python\nimport mylib\nmylib.do_something()\n```"
+        )
+
+        result = self.parser.format_for_llm([doc], "/group/project")
+
+        # Python code should be kept
+        assert "```python" in result
+        assert "mylib.do_something()" in result
+        # pip install should be filtered out
+        assert "pip install" not in result
+
+    def test_format_for_llm_readme_full_content(self):
+        """Test that README gets full content treatment."""
+        doc = Document(
+            version_id=1,
+            file_path="README.md",
+            content="# My Project\n\nThis is a comprehensive project description.\n\n## Features\n\n- Feature 1\n- Feature 2\n\n## Architecture\n\nThe system uses a modular design."
+        )
+
+        result = self.parser.format_for_llm([doc], "/group/project")
+
+        # Should include full content, not just description
+        assert "# README.md" in result
+        assert "comprehensive project description" in result
+        assert "## Features" in result
+        assert "Feature 1" in result
+        assert "## Architecture" in result
+        assert "modular design" in result
+
+    def test_format_for_llm_installation_doc_skipped(self):
+        """Test that installation docs are skipped (low priority)."""
+        docs = [
+            Document(version_id=1, file_path="INSTALL.md",
+                    content="# Installation\n\nInstall using pip:\n\n```bash\npip install mylib\n```"),
+            Document(version_id=1, file_path="api.md",
+                    content="# API Reference\n\nThe main API provides several methods for data processing.\n\n```python\napi.process(data)\n```"),
+        ]
+
+        result = self.parser.format_for_llm(docs, "/group/project")
+
+        # Installation doc should be skipped
+        assert "INSTALL.md" not in result
+        # API doc should be included
+        assert "api.md" in result or "API Reference" in result
+
+    def test_document_priority_classification(self):
+        """Test document priority classification."""
+        parser = Parser()
+
+        assert parser.get_document_priority("README.md") == "high"
+        assert parser.get_document_priority("docs/index.md") == "high"
+        assert parser.get_document_priority("ARCHITECTURE.md") == "high"
+        assert parser.get_document_priority("api/reference.md") == "normal"
+        assert parser.get_document_priority("INSTALL.md") == "low"
+        assert parser.get_document_priority("CONTRIBUTING.md") == "low"
+
+    def test_is_low_value_snippet(self):
+        """Test low-value snippet detection."""
+        parser = Parser()
+
+        # Low value snippets
+        assert parser.is_low_value_snippet("pip install mylib", "bash") is True
+        assert parser.is_low_value_snippet("docker run myimage", "shell") is True
+        assert parser.is_low_value_snippet("npm install -g package", "bash") is True
+        assert parser.is_low_value_snippet("git clone https://...", "bash") is True
+
+        # Valuable snippets
+        assert parser.is_low_value_snippet("import mylib\nmylib.process()", "python") is False
+        assert parser.is_low_value_snippet("const api = require('api')", "javascript") is False
+        # Multi-line bash scripts are kept
+        assert parser.is_low_value_snippet("#!/bin/bash\nfor i in *.txt; do\n  process $i\ndone", "bash") is False
 
 
 class TestParserInitialization:

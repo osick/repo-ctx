@@ -32,6 +32,63 @@ def parse_repo_id(repo_id: str) -> Tuple[str, str]:
     return (clean_id, "")
 
 
+# Valid include options for --include flag
+VALID_INCLUDE_OPTIONS = {'code', 'symbols', 'diagrams', 'tests', 'examples', 'all'}
+
+
+def parse_include_options(include_str: Optional[str]) -> dict:
+    """Parse --include flag into option dictionary.
+
+    Args:
+        include_str: Comma-separated string like "code,diagrams,tests"
+
+    Returns:
+        Dictionary with boolean flags:
+        - include_code: Include code structure (symbol lists)
+        - include_symbols: Include detailed symbol info
+        - include_diagrams: Include mermaid diagrams
+        - include_tests: Include test files/symbols
+        - include_examples: Include all doc code examples (override filtering)
+    """
+    result = {
+        'include_code': False,
+        'include_symbols': False,
+        'include_diagrams': False,
+        'include_tests': False,
+        'include_examples': False,
+    }
+
+    if not include_str:
+        return result
+
+    options = {opt.strip().lower() for opt in include_str.split(',')}
+
+    # Validate options
+    invalid = options - VALID_INCLUDE_OPTIONS
+    if invalid:
+        console.print(f"[yellow]Warning: Unknown include options ignored: {', '.join(invalid)}[/yellow]")
+        console.print(f"[dim]Valid options: {', '.join(sorted(VALID_INCLUDE_OPTIONS))}[/dim]")
+
+    # Handle 'all' - enables everything
+    if 'all' in options:
+        return {
+            'include_code': True,
+            'include_symbols': True,
+            'include_diagrams': True,
+            'include_tests': True,
+            'include_examples': True,
+        }
+
+    # Set individual flags
+    result['include_code'] = 'code' in options
+    result['include_symbols'] = 'symbols' in options
+    result['include_diagrams'] = 'diagrams' in options
+    result['include_tests'] = 'tests' in options
+    result['include_examples'] = 'examples' in options
+
+    return result
+
+
 def clone_repo_to_temp(clone_url: str, ref: str = None) -> str:
     """Clone a repository to a temporary directory using shallow clone.
 
@@ -80,25 +137,50 @@ def clone_repo_to_temp(clone_url: str, ref: str = None) -> str:
         raise RuntimeError("Git clone timed out")
 
 
-def analyze_local_directory(repo_path: str, analyzer) -> dict:
+def analyze_local_directory(repo_path: str, analyzer, exclude_tests: bool = True) -> dict:
     """Analyze all code files in a local directory.
 
     Args:
         repo_path: Path to the repository
         analyzer: CodeAnalyzer instance
+        exclude_tests: If True, exclude test files and directories
 
     Returns:
         Dictionary of {relative_path: content}
     """
     import os
 
+    # Directories to always skip (virtual envs, caches, build artifacts)
+    skip_dirs = {
+        '.git', '.venv', 'venv', 'env', '.env',
+        'node_modules', '__pycache__', '.pytest_cache',
+        '.mypy_cache', '.ruff_cache', '.tox',
+        'dist', 'build', 'egg-info', '.eggs',
+        'htmlcov', '.coverage', 'coverage',
+        '.idea', '.vscode', '.vs',
+        'vendor', 'third_party', 'external',
+    }
+
+    # Test directories to skip if exclude_tests is True
+    test_dirs = {'tests', 'test', 'spec', 'specs', '__tests__'}
+
     files = {}
     for root, dirs, filenames in os.walk(repo_path):
-        # Skip .git directory
-        if '.git' in dirs:
-            dirs.remove('.git')
+        # Remove directories we want to skip
+        dirs[:] = [d for d in dirs if d not in skip_dirs and not d.endswith('.egg-info')]
+
+        # Also skip test directories if requested
+        if exclude_tests:
+            dirs[:] = [d for d in dirs if d not in test_dirs]
 
         for filename in filenames:
+            # Skip test files if exclude_tests is True
+            if exclude_tests:
+                if filename.startswith('test_') or filename.endswith('_test.py'):
+                    continue
+                if filename.startswith('spec_') or filename.endswith('.spec.js'):
+                    continue
+
             full_path = os.path.join(root, filename)
             rel_path = os.path.relpath(full_path, repo_path)
 
@@ -146,6 +228,20 @@ def get_clone_url(provider_type: str, group: str, project: str, config) -> str:
         raise ValueError(f"Unsupported provider for clone: {provider_type}")
 
 
+def is_local_path(path: str) -> bool:
+    """Check if a path looks like a local filesystem path."""
+    if not path:
+        return False
+    # Check common Unix path prefixes
+    if path.startswith(("/home/", "/usr/", "/opt/", "/tmp/", "/var/", "/mnt/", "/media/", "/root/")):
+        return True
+    # Check if it's an absolute path with more than 3 parts
+    parts = path.strip("/").split("/")
+    if len(parts) > 3 and parts[0] in ('home', 'usr', 'opt', 'tmp', 'var', 'mnt', 'media', 'root'):
+        return True
+    return False
+
+
 async def get_or_analyze_repo(repo_id: str, force_refresh: bool = False):
     """Get stored analysis for a repo, or analyze and store it.
 
@@ -161,7 +257,13 @@ async def get_or_analyze_repo(repo_id: str, force_refresh: bool = False):
     context = GitLabContext(config)
     await context.init()
 
-    group, project = parse_repo_id(repo_id)
+    # Handle local paths differently - stored with full path as group, empty project
+    if is_local_path(repo_id):
+        group = repo_id.rstrip("/")
+        project = ""
+    else:
+        group, project = parse_repo_id(repo_id)
+
     lib = await context.storage.get_library(group, project)
 
     if not lib:
@@ -467,33 +569,49 @@ async def repo_docs(args):
         context = GitLabContext(config)
         await context.init()
 
+        # Parse include options
+        include_str = getattr(args, 'include', None)
+        include_opts = parse_include_options(include_str)
+        force_refresh = getattr(args, 'refresh', False)
+
         result = await context.get_documentation(
             args.id,
             topic=args.topic,
             page=args.page,
-            max_tokens=args.max_tokens
+            max_tokens=args.max_tokens,
+            include_examples=include_opts['include_examples']
         )
 
-        # If include-code flag is set, append code analysis
-        include_code = getattr(args, 'include_code', False)
-        force_refresh = getattr(args, 'refresh', False)
-        exclude_tests = getattr(args, 'exclude_tests', False)
+        # If any code-related include options are set, append code analysis
+        needs_code_analysis = (include_opts['include_code'] or
+                               include_opts['include_symbols'] or
+                               include_opts['include_diagrams'])
         code_analysis_data = None
 
-        if include_code:
+        if needs_code_analysis:
             from ..analysis import CodeAnalysisReport
 
             # Get symbols for the repository (force_refresh to re-analyze if requested)
             symbols, lib, error = await get_or_analyze_repo(args.id, force_refresh=force_refresh)
 
             if not error and symbols:
-                # Generate code analysis report (optionally excluding tests)
-                report = CodeAnalysisReport(symbols, exclude_tests=exclude_tests)
-                code_analysis_data = report.generate_json()
+                # Generate code analysis report with options
+                # Tests are excluded by default unless 'tests' is in include options
+                report = CodeAnalysisReport(
+                    symbols,
+                    exclude_tests=not include_opts['include_tests']
+                )
 
-                # Append markdown report to content
-                markdown_report = report.generate_markdown(include_mermaid=True)
+                # Generate markdown with selected sections
+                markdown_report = report.generate_markdown(
+                    include_code=include_opts['include_code'],
+                    include_symbols=include_opts['include_symbols'],
+                    include_mermaid=include_opts['include_diagrams']
+                )
                 result["content"][0]["text"] += f"\n\n---\n\n{markdown_report}"
+
+                # Generate JSON data for metadata
+                code_analysis_data = report.generate_json()
 
                 # Add to metadata
                 if "metadata" not in result:

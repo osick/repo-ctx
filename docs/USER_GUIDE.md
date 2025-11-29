@@ -58,10 +58,12 @@ repo-ctx code analyze ./src
 repo-ctx -o json code analyze ./src
 repo-ctx code analyze ./src --lang python --type class
 repo-ctx code analyze ./src --deps
+repo-ctx code analyze /owner/repo --repo        # Analyze indexed repo
 
 # Search for symbols
 repo-ctx code find ./src User
 repo-ctx -o json code find ./src Service --type class
+repo-ctx code find /owner/repo User --repo      # Search in indexed repo
 
 # Get symbol details
 repo-ctx code info ./src UserService
@@ -70,6 +72,13 @@ repo-ctx -o json code info ./src UserService
 # List file symbols
 repo-ctx code symbols ./src/service.py
 repo-ctx -o json code symbols ./src/service.py --group
+
+# Generate dependency graphs
+repo-ctx code dep ./src                          # Default: class diagram
+repo-ctx code dep ./src --type function          # Call graph
+repo-ctx code dep ./src --type file              # File dependencies
+repo-ctx code dep ./src --format dot             # GraphViz format
+repo-ctx code dep /owner/repo --repo             # From indexed repo
 ```
 
 ### Configuration Commands
@@ -89,9 +98,40 @@ repo-ctx -o json config show
 -v, --verbose                  # Verbose output
 ```
 
+### Include Options (for `repo docs`)
+
+The `--include` flag controls what content is included in documentation output:
+
+```bash
+-I, --include OPTIONS  # Comma-separated list of content types
+```
+
+| Option | Description |
+|--------|-------------|
+| `code` | Code structure (classes, functions, methods) |
+| `symbols` | Detailed symbol information with signatures |
+| `diagrams` | Mermaid diagrams (class hierarchy) |
+| `tests` | Include test files in analysis |
+| `examples` | Include all code examples from docs |
+| `all` | Enable all options |
+
+```bash
+# Include code structure only
+repo-ctx repo docs /owner/repo --include=code
+
+# Include code with diagrams
+repo-ctx repo docs /owner/repo --include=code,diagrams
+
+# Include everything
+repo-ctx repo docs /owner/repo --include=all
+
+# Combine with other options
+repo-ctx repo docs /owner/repo --include=code,symbols --max-tokens 15000
+```
+
 ---
 
-## MCP Tools (10 tools)
+## MCP Tools (11 tools)
 
 ### Repository Management
 
@@ -113,6 +153,13 @@ await mcp.call("repo-ctx-fuzzy-search", { query: "fastapi", limit: 5 });
 
 // Get documentation
 await mcp.call("repo-ctx-docs", { libraryId: "/owner/repo", maxTokens: 8000 });
+
+// Get documentation with code analysis
+await mcp.call("repo-ctx-docs", {
+  libraryId: "/owner/repo",
+  maxTokens: 10000,
+  include: ["code", "diagrams"]
+});
 ```
 
 ### Code Analysis
@@ -392,19 +439,25 @@ await mcp.call("repo-ctx-dependency-graph", {
 
 ## Combined Documentation with Code Analysis
 
-Get documentation AND code analysis together using `--include-code`:
+Get documentation AND code analysis together using `--include`:
 
 ### CLI
 
 ```bash
 # Get docs with code analysis summary
-repo-ctx repo docs /owner/repo --include-code
+repo-ctx repo docs /owner/repo --include=code
 
-# With token limit
-repo-ctx repo docs /owner/repo --include-code --max-tokens 10000
+# With detailed symbols and diagrams
+repo-ctx repo docs /owner/repo --include=code,symbols,diagrams
+
+# Include test files in analysis
+repo-ctx repo docs /owner/repo --include=code,tests
+
+# Include everything
+repo-ctx repo docs /owner/repo --include=all --max-tokens 15000
 
 # JSON output
-repo-ctx -o json repo docs /owner/repo --include-code
+repo-ctx -o json repo docs /owner/repo --include=code
 ```
 
 ### MCP Tool
@@ -414,14 +467,39 @@ repo-ctx -o json repo docs /owner/repo --include-code
 await mcp.call("repo-ctx-docs", {
   libraryId: "/owner/repo",
   maxTokens: 10000,
-  includeCodeAnalysis: true
+  include: ["code"]
+});
+
+// Include code, symbols, and diagrams
+await mcp.call("repo-ctx-docs", {
+  libraryId: "/owner/repo",
+  maxTokens: 15000,
+  include: ["code", "symbols", "diagrams"]
+});
+
+// Include everything
+await mcp.call("repo-ctx-docs", {
+  libraryId: "/owner/repo",
+  include: ["all"]
 });
 ```
 
+### Include Options
+
+| Option | Description |
+|--------|-------------|
+| `code` | Code structure (classes, functions, methods) |
+| `symbols` | Detailed symbol information with signatures and docs |
+| `diagrams` | Mermaid class hierarchy diagrams |
+| `tests` | Include test files in code analysis |
+| `examples` | Include all code examples from documentation |
+| `all` | Enable all of the above options |
+
 The code analysis section includes:
 - **Symbol Summary**: Count of classes, functions, methods, interfaces by language
-- **Class Hierarchy**: Mermaid diagram showing inheritance relationships
+- **Class Hierarchy**: Mermaid diagram showing inheritance relationships (when `diagrams` included)
 - **Top-Level API**: Public classes and functions with signatures
+- **Detailed Symbols**: Full symbol details with docs (when `symbols` included)
 - **Dependency Overview**: Key import relationships
 
 ---
@@ -503,7 +581,7 @@ The code analysis section includes:
 | 3 | `repo-ctx-index` | Repo | `repository`, `provider` |
 | 4 | `repo-ctx-index-group` | Repo | `group`, `includeSubgroups` |
 | 5 | `repo-ctx-list` | Repo | `provider` |
-| 6 | `repo-ctx-docs` | Repo | `libraryId`, `maxTokens`, `includeCodeAnalysis` |
+| 6 | `repo-ctx-docs` | Repo | `libraryId`, `maxTokens`, `include` |
 | 7 | `repo-ctx-analyze` | Code | `path`, `repoId`, `language`, `symbolType` |
 | 8 | `repo-ctx-search-symbol` | Code | `path`, `repoId`, `query`, `symbolType` |
 | 9 | `repo-ctx-get-symbol-detail` | Code | `path`, `repoId`, `symbolName` |

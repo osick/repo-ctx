@@ -96,11 +96,15 @@ class CodeAnalysisReport:
             self.symbols = symbols
             self.dependencies = dependencies or []
 
-    def generate_markdown(self, include_mermaid: bool = True) -> str:
+    def generate_markdown(self, include_mermaid: bool = True,
+                          include_code: bool = True,
+                          include_symbols: bool = False) -> str:
         """Generate a complete markdown report.
 
         Args:
-            include_mermaid: Whether to include mermaid diagrams
+            include_mermaid: Whether to include mermaid diagrams (hierarchy, call graph, imports)
+            include_code: Whether to include code structure (classes, functions, modules)
+            include_symbols: Whether to include detailed symbol info (docstrings, full signatures)
 
         Returns:
             Markdown formatted report string
@@ -110,25 +114,27 @@ class CodeAnalysisReport:
         # Header
         sections.append("## Code Analysis\n")
 
-        # Classes section
-        classes_section = self._generate_classes_section()
-        if classes_section:
-            sections.append(classes_section)
+        # Code structure sections (classes, interfaces, enums, functions)
+        if include_code or include_symbols:
+            # Classes section
+            classes_section = self._generate_classes_section(detailed=include_symbols)
+            if classes_section:
+                sections.append(classes_section)
 
-        # Interfaces section
-        interfaces_section = self._generate_interfaces_section()
-        if interfaces_section:
-            sections.append(interfaces_section)
+            # Interfaces section
+            interfaces_section = self._generate_interfaces_section(detailed=include_symbols)
+            if interfaces_section:
+                sections.append(interfaces_section)
 
-        # Enums section
-        enums_section = self._generate_enums_section()
-        if enums_section:
-            sections.append(enums_section)
+            # Enums section
+            enums_section = self._generate_enums_section(detailed=include_symbols)
+            if enums_section:
+                sections.append(enums_section)
 
-        # Functions section
-        functions_section = self._generate_functions_section()
-        if functions_section:
-            sections.append(functions_section)
+            # Functions section
+            functions_section = self._generate_functions_section(detailed=include_symbols)
+            if functions_section:
+                sections.append(functions_section)
 
         # Class hierarchy (mermaid)
         if include_mermaid:
@@ -137,29 +143,35 @@ class CodeAnalysisReport:
                 sections.append(hierarchy)
 
         # Module/File structure
-        modules_section = self._generate_modules_section()
-        if modules_section:
-            sections.append(modules_section)
+        if include_code or include_symbols:
+            modules_section = self._generate_modules_section()
+            if modules_section:
+                sections.append(modules_section)
 
         # Dependencies overview
-        if self.dependencies:
+        if self.dependencies and (include_code or include_symbols):
             sections.append(self._generate_dependencies_section())
 
+        # Mermaid diagrams for dependencies
+        if include_mermaid and self.dependencies:
             # Call graph mermaid diagram
-            if include_mermaid:
-                call_graph = self._generate_call_graph_mermaid()
-                if call_graph:
-                    sections.append(call_graph)
+            call_graph = self._generate_call_graph_mermaid()
+            if call_graph:
+                sections.append(call_graph)
 
-                # Import dependencies mermaid diagram
-                import_graph = self._generate_import_graph_mermaid()
-                if import_graph:
-                    sections.append(import_graph)
+            # Import dependencies mermaid diagram
+            import_graph = self._generate_import_graph_mermaid()
+            if import_graph:
+                sections.append(import_graph)
 
         return "\n".join(sections)
 
-    def _generate_classes_section(self) -> Optional[str]:
-        """Generate complete classes section with all classes listed."""
+    def _generate_classes_section(self, detailed: bool = False) -> Optional[str]:
+        """Generate classes section.
+
+        Args:
+            detailed: If True, include full docstrings and method details.
+        """
         classes = [s for s in self.symbols if s.symbol_type == SymbolType.CLASS]
 
         if not classes:
@@ -201,15 +213,19 @@ class CodeAnalysisReport:
                 # Documentation
                 if cls.documentation:
                     doc = cls.documentation.strip()
-                    # Show full documentation, just clean up whitespace
                     doc_lines = doc.split('\n')
-                    if len(doc_lines) == 1:
-                        lines.append(f"  - {doc}")
+                    if detailed:
+                        # Full documentation
+                        if len(doc_lines) == 1:
+                            lines.append(f"  - {doc}")
+                        else:
+                            lines.append(f"  - {doc_lines[0]}")
+                            for doc_line in doc_lines[1:]:
+                                if doc_line.strip():
+                                    lines.append(f"    {doc_line.strip()}")
                     else:
-                        lines.append(f"  - {doc_lines[0]}")
-                        for doc_line in doc_lines[1:]:
-                            if doc_line.strip():
-                                lines.append(f"    {doc_line.strip()}")
+                        # First line only, truncated
+                        lines.append(f"  - {doc_lines[0][:100]}{'...' if len(doc_lines[0]) > 100 else ''}")
 
                 # Methods of this class
                 methods = [s for s in self.symbols
@@ -221,15 +237,23 @@ class CodeAnalysisReport:
                     private_methods = [m for m in methods if m.visibility != "public"]
 
                     if public_methods:
-                        lines.append(f"  - Public methods ({len(public_methods)}):")
-                        for method in sorted(public_methods, key=lambda x: x.name):
-                            sig = method.signature or method.name
-                            # Clean up signature - remove class prefix if present
-                            if sig.startswith(f"{cls.name}."):
-                                sig = sig[len(cls.name) + 1:]
-                            lines.append(f"    - `{sig}`")
+                        if detailed:
+                            lines.append(f"  - Public methods ({len(public_methods)}):")
+                            for method in sorted(public_methods, key=lambda x: x.name):
+                                sig = method.signature or method.name
+                                if sig.startswith(f"{cls.name}."):
+                                    sig = sig[len(cls.name) + 1:]
+                                lines.append(f"    - `{sig}`")
+                                if method.documentation:
+                                    doc_first = method.documentation.strip().split('\n')[0]
+                                    lines.append(f"      {doc_first[:80]}")
+                        else:
+                            # Compact: list method names
+                            method_names = [m.name for m in sorted(public_methods, key=lambda x: x.name)[:5]]
+                            more = f" +{len(public_methods) - 5} more" if len(public_methods) > 5 else ""
+                            lines.append(f"  - Methods: {', '.join(method_names)}{more}")
 
-                    if private_methods:
+                    if detailed and private_methods:
                         lines.append(f"  - Private methods ({len(private_methods)}):")
                         for method in sorted(private_methods, key=lambda x: x.name):
                             sig = method.signature or method.name
@@ -239,7 +263,7 @@ class CodeAnalysisReport:
 
         return "\n".join(lines)
 
-    def _generate_interfaces_section(self) -> Optional[str]:
+    def _generate_interfaces_section(self, detailed: bool = False) -> Optional[str]:
         """Generate complete interfaces section."""
         interfaces = [s for s in self.symbols if s.symbol_type == SymbolType.INTERFACE]
 
@@ -270,8 +294,8 @@ class CodeAnalysisReport:
 
         return "\n".join(lines)
 
-    def _generate_enums_section(self) -> Optional[str]:
-        """Generate complete enums section."""
+    def _generate_enums_section(self, detailed: bool = False) -> Optional[str]:
+        """Generate enums section."""
         enums = [s for s in self.symbols if s.symbol_type == SymbolType.ENUM]
 
         if not enums:
@@ -288,7 +312,7 @@ class CodeAnalysisReport:
             if enum.line_start:
                 lines.append(f"  - Location: line {enum.line_start}")
 
-            if enum.documentation:
+            if enum.documentation and detailed:
                 lines.append(f"  - {enum.documentation.strip()}")
 
             # Show enum values if available in metadata
@@ -300,8 +324,8 @@ class CodeAnalysisReport:
 
         return "\n".join(lines)
 
-    def _generate_functions_section(self) -> Optional[str]:
-        """Generate complete functions section (top-level functions only)."""
+    def _generate_functions_section(self, detailed: bool = False) -> Optional[str]:
+        """Generate functions section (top-level functions only)."""
         functions = [s for s in self.symbols
                     if s.symbol_type == SymbolType.FUNCTION
                     and s.visibility == "public"]
@@ -333,15 +357,18 @@ class CodeAnalysisReport:
                 if func.documentation:
                     doc = func.documentation.strip()
                     doc_lines = doc.split('\n')
-                    if len(doc_lines) == 1:
-                        lines.append(f"  - {doc}")
+                    if detailed:
+                        # Full documentation
+                        if len(doc_lines) == 1:
+                            lines.append(f"  - {doc}")
+                        else:
+                            lines.append(f"  - {doc_lines[0]}")
+                            for doc_line in doc_lines[1:]:
+                                if doc_line.strip():
+                                    lines.append(f"    {doc_line.strip()}")
                     else:
-                        lines.append(f"  - {doc_lines[0]}")
-                        for doc_line in doc_lines[1:3]:  # Show first few lines of multiline docs
-                            if doc_line.strip():
-                                lines.append(f"    {doc_line.strip()}")
-                        if len(doc_lines) > 3:
-                            lines.append(f"    ...")
+                        # First line only
+                        lines.append(f"  - {doc_lines[0][:100]}{'...' if len(doc_lines[0]) > 100 else ''}")
 
                 lines.append("")
 

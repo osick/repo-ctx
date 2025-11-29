@@ -83,12 +83,17 @@ class TestCodeAnalysisReportMarkdown:
             ),
         ]
         report = CodeAnalysisReport(symbols)
-        markdown = report.generate_markdown()
 
-        assert "Public methods (1):" in markdown
-        assert "public_method(self, arg)" in markdown
-        assert "Private methods (1):" in markdown
-        assert "_private_method(self)" in markdown
+        # Default (compact) mode shows method names only
+        markdown = report.generate_markdown()
+        assert "Methods: public_method" in markdown
+
+        # Detailed mode (include_symbols=True) shows full method list
+        markdown_detailed = report.generate_markdown(include_symbols=True)
+        assert "Public methods (1):" in markdown_detailed
+        assert "public_method(self, arg)" in markdown_detailed
+        assert "Private methods (1):" in markdown_detailed
+        assert "_private_method(self)" in markdown_detailed
 
     def test_class_inheritance_shown(self):
         """Test that inheritance info is shown."""
