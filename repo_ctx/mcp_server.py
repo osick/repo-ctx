@@ -40,6 +40,14 @@ async def get_or_analyze_repo(context: GitLabContext, repo_id: str, force_refres
         # Return stored symbols
         symbols = []
         for s in stored_symbols:
+            # Parse metadata from JSON string
+            metadata = {}
+            if s.get('metadata'):
+                try:
+                    metadata = json.loads(s['metadata']) if isinstance(s['metadata'], str) else s['metadata']
+                except (json.JSONDecodeError, TypeError):
+                    metadata = {}
+
             symbols.append(Symbol(
                 name=s['name'],
                 symbol_type=SymbolType(s['symbol_type']),
@@ -52,35 +60,86 @@ async def get_or_analyze_repo(context: GitLabContext, repo_id: str, force_refres
                 qualified_name=s.get('qualified_name'),
                 documentation=s.get('documentation'),
                 is_exported=s.get('is_exported', True),
-                metadata={}
+                metadata=metadata
             ))
         return symbols, lib, None
 
-    # Need to fetch and analyze
+    # Need to fetch and analyze - use git clone for efficiency
+    import shutil
+    import tempfile
+    import subprocess
+    import os
+
+    def clone_repo_to_temp(clone_url: str) -> str:
+        """Clone repo to temp directory using shallow clone."""
+        temp_dir = tempfile.mkdtemp(prefix="repo_ctx_")
+        try:
+            cmd = ["git", "clone", "--depth", "1", clone_url, temp_dir]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode != 0:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                raise RuntimeError(f"Git clone failed: {result.stderr}")
+            return temp_dir
+        except subprocess.TimeoutExpired:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise RuntimeError("Git clone timed out")
+
+    def analyze_local_directory(repo_path: str, analyzer) -> dict:
+        """Analyze all code files in a local directory."""
+        files = {}
+        for root, dirs, filenames in os.walk(repo_path):
+            if '.git' in dirs:
+                dirs.remove('.git')
+            for filename in filenames:
+                full_path = os.path.join(root, filename)
+                rel_path = os.path.relpath(full_path, repo_path)
+                if analyzer.detect_language(rel_path):
+                    try:
+                        with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            files[rel_path] = f.read()
+                    except Exception:
+                        continue
+        return files
+
+    def get_clone_url(provider_type: str, group: str, project: str, config) -> str:
+        """Get the clone URL for a repository."""
+        if provider_type == "github":
+            token = getattr(config, 'github_token', None)
+            if token:
+                return f"https://{token}@github.com/{group}/{project}.git"
+            return f"https://github.com/{group}/{project}.git"
+        elif provider_type == "gitlab":
+            base_url = getattr(config, 'gitlab_url', "https://gitlab.com").rstrip('/')
+            from urllib.parse import urlparse
+            host = urlparse(base_url).netloc or urlparse(base_url).path
+            token = getattr(config, 'gitlab_token', None)
+            if token:
+                return f"https://oauth2:{token}@{host}/{group}/{project}.git"
+            return f"https://{host}/{group}/{project}.git"
+        else:
+            raise ValueError(f"Unsupported provider for clone: {provider_type}")
+
+    temp_dir = None
     try:
         config = context.config
-        provider = ProviderFactory.from_config(config, lib.provider)
-        project_path = f"{group}/{project}"
-        project_info = await provider.get_project(project_path)
-        ref = await provider.get_default_branch(project_info)
-        file_paths = await provider.get_file_tree(project_info, ref)
-
         analyzer = CodeAnalyzer()
-        files = {}
-        for file_path in file_paths:
-            if analyzer.detect_language(file_path):
-                try:
-                    file_content = await provider.read_file(project_info, file_path, ref)
-                    files[file_path] = file_content.content
-                except Exception:
-                    continue
+
+        # For local provider, analyze directly
+        if lib.provider == "local":
+            repo_path = f"{group}/{project}" if project else group
+            files = analyze_local_directory(repo_path, analyzer)
+        else:
+            # Clone repo to temp directory (single operation, no API rate limits)
+            clone_url = get_clone_url(lib.provider, group, project, config)
+            temp_dir = clone_repo_to_temp(clone_url)
+            files = analyze_local_directory(temp_dir, analyzer)
 
         if not files:
             return [], lib, None
 
-        # Analyze
-        results = analyzer.analyze_files(files)
-        symbols = analyzer.aggregate_symbols(results)
+        # Analyze all files
+        analysis_results = analyzer.analyze_files(files)
+        symbols = analyzer.aggregate_symbols(analysis_results)
 
         # Store symbols in database
         await context.storage.save_symbols(symbols, lib.id)
@@ -89,6 +148,11 @@ async def get_or_analyze_repo(context: GitLabContext, repo_id: str, force_refres
 
     except Exception as e:
         return None, lib, str(e)
+
+    finally:
+        # Clean up temp directory
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 async def serve(
@@ -242,6 +306,16 @@ async def serve(
                         "includeCodeAnalysis": {
                             "type": "boolean",
                             "description": "Include code analysis summary with symbol statistics, class hierarchy (mermaid), and public API overview (default: false)",
+                            "default": False
+                        },
+                        "refreshCodeAnalysis": {
+                            "type": "boolean",
+                            "description": "Force re-analysis of code (ignore cached symbols). Use when class hierarchy is missing edges. (default: false)",
+                            "default": False
+                        },
+                        "excludeTests": {
+                            "type": "boolean",
+                            "description": "Exclude test classes/functions from code analysis output (default: false)",
                             "default": False
                         }
                     },
@@ -545,6 +619,8 @@ async def serve(
             max_tokens = arguments.get("maxTokens")
             include_metadata = arguments.get("includeMetadata", False)
             include_code_analysis = arguments.get("includeCodeAnalysis", False)
+            refresh_code_analysis = arguments.get("refreshCodeAnalysis", False)
+            exclude_tests = arguments.get("excludeTests", False)
 
             try:
                 result = await context.get_documentation(
@@ -578,12 +654,12 @@ async def serve(
                 if include_code_analysis:
                     from .analysis import CodeAnalysisReport
 
-                    # Get symbols for the repository
-                    symbols, lib, error = await get_or_analyze_repo(context, library_id)
+                    # Get symbols for the repository (refresh if requested)
+                    symbols, lib, error = await get_or_analyze_repo(context, library_id, force_refresh=refresh_code_analysis)
 
                     if not error and symbols:
-                        # Generate code analysis report
-                        report = CodeAnalysisReport(symbols)
+                        # Generate code analysis report (optionally excluding tests)
+                        report = CodeAnalysisReport(symbols, exclude_tests=exclude_tests)
                         markdown_report = report.generate_markdown(include_mermaid=True)
                         response_text += f"\n\n---\n\n{markdown_report}"
 

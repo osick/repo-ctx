@@ -125,6 +125,10 @@ Run 'repo-ctx <command> --help' for command details.
     repo_docs.add_argument("--page", type=int, default=1, help="Page number (default: 1)")
     repo_docs.add_argument("--include-code", action="store_true",
                           help="Include code analysis summary (symbols, hierarchy, dependencies)")
+    repo_docs.add_argument("--exclude-tests", action="store_true",
+                          help="Exclude test classes/functions from code analysis output")
+    repo_docs.add_argument("--refresh", action="store_true",
+                          help="Force re-analysis of code (ignore cached symbols)")
 
     # === CODE commands ===
     code_parser = subparsers.add_parser(

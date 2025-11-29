@@ -2,7 +2,11 @@
 
 import sys
 import os
+import json
 import asyncio
+import subprocess
+import tempfile
+import shutil
 from typing import Optional, List, Dict, Any
 
 import questionary
@@ -66,6 +70,72 @@ async def get_library_info(repo_id: str):
     return lib, context, config
 
 
+def clone_repo_to_temp(clone_url: str, ref: str = None) -> str:
+    """Clone a repository to a temporary directory using shallow clone.
+
+    Returns the path to the cloned repository.
+    Raises RuntimeError if clone fails.
+    """
+    temp_dir = tempfile.mkdtemp(prefix="repo_ctx_")
+    try:
+        cmd = ["git", "clone", "--depth", "1"]
+        if ref:
+            cmd.extend(["--branch", ref])
+        cmd.extend([clone_url, temp_dir])
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise RuntimeError(f"Git clone failed: {result.stderr}")
+        return temp_dir
+    except subprocess.TimeoutExpired:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise RuntimeError("Git clone timed out")
+
+
+def analyze_local_directory(directory: str, analyzer) -> dict:
+    """Analyze all code files in a local directory.
+
+    Returns a dict mapping file paths to their content.
+    """
+    files = {}
+    for root, dirs, filenames in os.walk(directory):
+        # Skip hidden directories and common non-code directories
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in
+                   {'node_modules', '__pycache__', 'venv', '.venv', 'env', 'build', 'dist', 'target'}]
+
+        for filename in filenames:
+            if filename.startswith('.'):
+                continue
+            full_path = os.path.join(root, filename)
+            rel_path = os.path.relpath(full_path, directory)
+
+            # Check if it's a code file
+            if not analyzer.detect_language(rel_path):
+                continue
+
+            try:
+                with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    files[rel_path] = f.read()
+            except (IOError, OSError):
+                continue
+
+    return files
+
+
+def get_clone_url(provider_name: str, group: str, project: str, token: str = None) -> str:
+    """Generate clone URL for a repository."""
+    if provider_name == "github":
+        if token:
+            return f"https://x-access-token:{token}@github.com/{group}/{project}.git"
+        return f"https://github.com/{group}/{project}.git"
+    elif provider_name == "gitlab":
+        if token:
+            return f"https://oauth2:{token}@gitlab.com/{group}/{project}.git"
+        return f"https://gitlab.com/{group}/{project}.git"
+    else:
+        raise ValueError(f"Unsupported provider for clone: {provider_name}")
+
+
 async def get_or_analyze_repo(repo_id: str, force_refresh: bool = False):
     """Get stored analysis for a repo, or analyze and store it."""
     from ..config import Config
@@ -91,6 +161,14 @@ async def get_or_analyze_repo(repo_id: str, force_refresh: bool = False):
         from ..analysis import Symbol, SymbolType
         symbols = []
         for s in stored_symbols:
+            # Parse metadata from JSON string
+            metadata = {}
+            if s.get('metadata'):
+                try:
+                    metadata = json.loads(s['metadata']) if isinstance(s['metadata'], str) else s['metadata']
+                except (json.JSONDecodeError, TypeError):
+                    metadata = {}
+
             symbols.append(Symbol(
                 name=s['name'],
                 symbol_type=SymbolType(s['symbol_type']),
@@ -103,34 +181,48 @@ async def get_or_analyze_repo(repo_id: str, force_refresh: bool = False):
                 qualified_name=s.get('qualified_name'),
                 documentation=s.get('documentation'),
                 is_exported=s.get('is_exported', True),
-                metadata={}
+                metadata=metadata
             ))
         return symbols, lib, None
 
-    # Need to fetch and analyze
+    # Need to fetch and analyze - use git clone for efficiency
+    temp_dir = None
     try:
-        provider = ProviderFactory.from_config(config, lib.provider)
-        project_path = f"{group}/{project}"
-        project_info = await provider.get_project(project_path)
-        ref = await provider.get_default_branch(project_info)
-        file_paths = await provider.get_file_tree(project_info, ref)
-
         analyzer = CodeAnalyzer()
-        files = {}
-        for file_path in file_paths:
-            if analyzer.detect_language(file_path):
-                try:
-                    file_content = await provider.read_file(project_info, file_path, ref)
-                    files[file_path] = file_content.content
-                except Exception:
-                    continue
+
+        if lib.provider in ("github", "gitlab"):
+            # Get token from config for authenticated clone
+            token = None
+            if lib.provider == "github":
+                token = config.github_token
+            elif lib.provider == "gitlab":
+                token = config.gitlab_token
+
+            # Clone repository to temp directory
+            clone_url = get_clone_url(lib.provider, group, project, token)
+            temp_dir = clone_repo_to_temp(clone_url)
+
+            # Analyze all code files from local directory
+            files = analyze_local_directory(temp_dir, analyzer)
+        else:
+            # For local provider, get project info and file tree through provider
+            from ..providers import ProviderFactory
+            provider = ProviderFactory.from_config(config, lib.provider)
+            project_path = f"{group}/{project}"
+            project_info = await provider.get_project(project_path)
+            local_path = project_info.get('path', project_path)
+
+            if os.path.isdir(local_path):
+                files = analyze_local_directory(local_path, analyzer)
+            else:
+                return [], lib, None
 
         if not files:
             return [], lib, None
 
         # Analyze
-        results = analyzer.analyze_files(files)
-        symbols = analyzer.aggregate_symbols(results)
+        analysis_results = analyzer.analyze_files(files)
+        symbols = analyzer.aggregate_symbols(analysis_results)
 
         # Store symbols in database
         await context.storage.save_symbols(symbols, lib.id)
@@ -139,6 +231,10 @@ async def get_or_analyze_repo(repo_id: str, force_refresh: bool = False):
 
     except Exception as e:
         return None, lib, str(e)
+    finally:
+        # Clean up temp directory
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def is_local_path(path: str) -> bool:

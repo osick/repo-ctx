@@ -32,8 +32,126 @@ def parse_repo_id(repo_id: str) -> Tuple[str, str]:
     return (clean_id, "")
 
 
+def clone_repo_to_temp(clone_url: str, ref: str = None) -> str:
+    """Clone a repository to a temporary directory using shallow clone.
+
+    Args:
+        clone_url: Git clone URL (https or ssh)
+        ref: Optional branch/tag to checkout
+
+    Returns:
+        Path to the cloned repository
+
+    Raises:
+        RuntimeError: If clone fails
+    """
+    import tempfile
+    import subprocess
+
+    # Create temp directory
+    temp_dir = tempfile.mkdtemp(prefix="repo_ctx_")
+
+    try:
+        # Build clone command - shallow clone for speed
+        cmd = ["git", "clone", "--depth", "1"]
+        if ref:
+            cmd.extend(["--branch", ref])
+        cmd.extend([clone_url, temp_dir])
+
+        # Run clone
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120  # 2 minute timeout
+        )
+
+        if result.returncode != 0:
+            # Clean up on failure
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise RuntimeError(f"Git clone failed: {result.stderr}")
+
+        return temp_dir
+
+    except subprocess.TimeoutExpired:
+        import shutil
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise RuntimeError("Git clone timed out")
+
+
+def analyze_local_directory(repo_path: str, analyzer) -> dict:
+    """Analyze all code files in a local directory.
+
+    Args:
+        repo_path: Path to the repository
+        analyzer: CodeAnalyzer instance
+
+    Returns:
+        Dictionary of {relative_path: content}
+    """
+    import os
+
+    files = {}
+    for root, dirs, filenames in os.walk(repo_path):
+        # Skip .git directory
+        if '.git' in dirs:
+            dirs.remove('.git')
+
+        for filename in filenames:
+            full_path = os.path.join(root, filename)
+            rel_path = os.path.relpath(full_path, repo_path)
+
+            # Check if it's a code file we can analyze
+            if analyzer.detect_language(rel_path):
+                try:
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        files[rel_path] = f.read()
+                except Exception:
+                    continue
+
+    return files
+
+
+def get_clone_url(provider_type: str, group: str, project: str, config) -> str:
+    """Get the clone URL for a repository.
+
+    Args:
+        provider_type: 'github', 'gitlab', or 'local'
+        group: Repository group/owner
+        project: Repository name
+        config: Config object
+
+    Returns:
+        Clone URL string
+    """
+    if provider_type == "github":
+        # Use HTTPS with token if available
+        token = config.github_token if hasattr(config, 'github_token') else None
+        if token:
+            return f"https://{token}@github.com/{group}/{project}.git"
+        return f"https://github.com/{group}/{project}.git"
+    elif provider_type == "gitlab":
+        base_url = config.gitlab_url if hasattr(config, 'gitlab_url') else "https://gitlab.com"
+        base_url = base_url.rstrip('/')
+        # Extract host from URL
+        from urllib.parse import urlparse
+        parsed = urlparse(base_url)
+        host = parsed.netloc or parsed.path
+        token = config.gitlab_token if hasattr(config, 'gitlab_token') else None
+        if token:
+            return f"https://oauth2:{token}@{host}/{group}/{project}.git"
+        return f"https://{host}/{group}/{project}.git"
+    else:
+        raise ValueError(f"Unsupported provider for clone: {provider_type}")
+
+
 async def get_or_analyze_repo(repo_id: str, force_refresh: bool = False):
-    """Get stored analysis for a repo, or analyze and store it."""
+    """Get stored analysis for a repo, or analyze and store it.
+
+    Uses git clone for efficient bulk file loading instead of per-file API calls.
+    """
+    import shutil
     from ..config import Config
     from ..core import GitLabContext
     from ..analysis import CodeAnalyzer, Symbol, SymbolType
@@ -56,6 +174,14 @@ async def get_or_analyze_repo(repo_id: str, force_refresh: bool = False):
         # Return stored symbols
         symbols = []
         for s in stored_symbols:
+            # Parse metadata from JSON string
+            metadata = {}
+            if s.get('metadata'):
+                try:
+                    metadata = json.loads(s['metadata']) if isinstance(s['metadata'], str) else s['metadata']
+                except (json.JSONDecodeError, TypeError):
+                    metadata = {}
+
             symbols.append(Symbol(
                 name=s['name'],
                 symbol_type=SymbolType(s['symbol_type']),
@@ -68,34 +194,31 @@ async def get_or_analyze_repo(repo_id: str, force_refresh: bool = False):
                 qualified_name=s.get('qualified_name'),
                 documentation=s.get('documentation'),
                 is_exported=s.get('is_exported', True),
-                metadata={}
+                metadata=metadata
             ))
         return symbols, lib, None
 
-    # Need to fetch and analyze
+    # Need to fetch and analyze - use git clone for efficiency
+    temp_dir = None
     try:
-        provider = ProviderFactory.from_config(config, lib.provider)
-        project_path = f"{group}/{project}"
-        project_info = await provider.get_project(project_path)
-        ref = await provider.get_default_branch(project_info)
-        file_paths = await provider.get_file_tree(project_info, ref)
-
         analyzer = CodeAnalyzer()
-        files = {}
-        for file_path in file_paths:
-            if analyzer.detect_language(file_path):
-                try:
-                    file_content = await provider.read_file(project_info, file_path, ref)
-                    files[file_path] = file_content.content
-                except Exception:
-                    continue
+
+        # For local provider, analyze directly
+        if lib.provider == "local":
+            repo_path = f"{group}/{project}" if project else group
+            files = analyze_local_directory(repo_path, analyzer)
+        else:
+            # Clone repo to temp directory (single operation, no API rate limits)
+            clone_url = get_clone_url(lib.provider, group, project, config)
+            temp_dir = clone_repo_to_temp(clone_url)
+            files = analyze_local_directory(temp_dir, analyzer)
 
         if not files:
             return [], lib, None
 
-        # Analyze
-        results = analyzer.analyze_files(files)
-        symbols = analyzer.aggregate_symbols(results)
+        # Analyze all files
+        analysis_results = analyzer.analyze_files(files)
+        symbols = analyzer.aggregate_symbols(analysis_results)
 
         # Store symbols in database
         await context.storage.save_symbols(symbols, lib.id)
@@ -104,6 +227,11 @@ async def get_or_analyze_repo(repo_id: str, force_refresh: bool = False):
 
     except Exception as e:
         return None, lib, str(e)
+
+    finally:
+        # Clean up temp directory
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def run_command(args):
@@ -348,17 +476,19 @@ async def repo_docs(args):
 
         # If include-code flag is set, append code analysis
         include_code = getattr(args, 'include_code', False)
+        force_refresh = getattr(args, 'refresh', False)
+        exclude_tests = getattr(args, 'exclude_tests', False)
         code_analysis_data = None
 
         if include_code:
             from ..analysis import CodeAnalysisReport
 
-            # Get symbols for the repository
-            symbols, lib, error = await get_or_analyze_repo(args.id)
+            # Get symbols for the repository (force_refresh to re-analyze if requested)
+            symbols, lib, error = await get_or_analyze_repo(args.id, force_refresh=force_refresh)
 
             if not error and symbols:
-                # Generate code analysis report
-                report = CodeAnalysisReport(symbols)
+                # Generate code analysis report (optionally excluding tests)
+                report = CodeAnalysisReport(symbols, exclude_tests=exclude_tests)
                 code_analysis_data = report.generate_json()
 
                 # Append markdown report to content
