@@ -674,3 +674,133 @@ It explains ideas and concepts in plain language.
 
         assert metadata["snippet_count"] == 0
         assert metadata["has_code_examples"] is False
+
+
+class TestParserRelevanceScoring:
+    """Test query-aware relevance scoring."""
+
+    def setup_method(self):
+        """Set up parser instance for each test."""
+        self.parser = Parser()
+
+    def test_calculate_relevance_score_title_match(self):
+        """Test that matching title gives high relevance score."""
+        content = """# Authentication Guide
+
+This guide explains how to authenticate users.
+"""
+        score = self.parser.calculate_relevance_score(
+            content, "docs/auth.md", "authentication"
+        )
+        # Title match (20pts) + heading match (10pts) + content match (5pts) = 35
+        assert score >= 30
+
+    def test_calculate_relevance_score_path_match(self):
+        """Test that matching file path contributes to score."""
+        content = """# Guide
+
+Some content about user management.
+"""
+        score = self.parser.calculate_relevance_score(
+            content, "docs/authentication/setup.md", "authentication"
+        )
+        # Path match should contribute (10 points per keyword in path)
+        assert score >= 10
+
+    def test_calculate_relevance_score_heading_match(self):
+        """Test that matching headings contribute to score."""
+        content = """# API Documentation
+
+## Authentication
+
+This section covers authentication.
+
+## Authorization
+
+This section covers authorization.
+"""
+        score = self.parser.calculate_relevance_score(
+            content, "docs/api.md", "authentication"
+        )
+        # Heading match (10pts) + content match (5pts) = 15
+        assert score >= 15
+
+    def test_calculate_relevance_score_content_match(self):
+        """Test that matching content contributes to score."""
+        content = """# Setup Guide
+
+This guide covers the basic setup process.
+You will need to configure authentication tokens.
+Authentication is required for all API calls.
+"""
+        score = self.parser.calculate_relevance_score(
+            content, "docs/setup.md", "authentication"
+        )
+        # Content match (5 points per keyword)
+        assert score >= 5
+
+    def test_calculate_relevance_score_no_match(self):
+        """Test low score when query doesn't match anything."""
+        content = """# Database Setup
+
+This guide covers PostgreSQL configuration.
+"""
+        score = self.parser.calculate_relevance_score(
+            content, "docs/database.md", "authentication"
+        )
+        # No matches should give low score
+        assert score < 20
+
+    def test_calculate_relevance_score_multiple_keywords(self):
+        """Test relevance scoring with multiple query keywords."""
+        content = """# OAuth Authentication
+
+This guide covers OAuth 2.0 authentication flow.
+
+## Token Management
+
+Learn how to manage access tokens.
+"""
+        score = self.parser.calculate_relevance_score(
+            content, "docs/oauth.md", "oauth authentication tokens"
+        )
+        # Multiple keyword matches should boost score
+        assert score >= 50
+
+    def test_calculate_relevance_score_case_insensitive(self):
+        """Test that relevance scoring is case insensitive."""
+        content = """# AUTHENTICATION Guide
+
+This covers Authentication setup.
+"""
+        score = self.parser.calculate_relevance_score(
+            content, "docs/auth.md", "authentication"
+        )
+        # Should match regardless of case
+        assert score >= 30
+
+    def test_calculate_relevance_score_empty_query(self):
+        """Test handling of empty query."""
+        content = "# Test\n\nContent here."
+        score = self.parser.calculate_relevance_score(
+            content, "test.md", ""
+        )
+        assert score == 0
+
+    def test_calculate_relevance_score_capped_at_100(self):
+        """Test that relevance score is capped at 100."""
+        content = """# Authentication OAuth Tokens
+
+## Authentication
+## OAuth
+## Tokens
+
+Content about authentication, oauth, and tokens.
+Authentication authentication authentication.
+OAuth oauth oauth. Tokens tokens tokens.
+"""
+        score = self.parser.calculate_relevance_score(
+            content, "authentication/oauth/tokens.md", "authentication oauth tokens"
+        )
+        # Score should be capped at 100
+        assert score <= 100

@@ -678,3 +678,154 @@ class Parser:
                 continue
 
         return "".join(output)
+
+    def format_summary_for_llm(self, documents: list, library_id: str) -> str:
+        """
+        Format documents as a compact summary for LLM consumption.
+
+        Includes only:
+        - Document titles
+        - Short descriptions (1-2 sentences)
+        - List of key sections/headings
+
+        Designed for SUMMARY output mode (~500-2000 tokens).
+
+        Args:
+            documents: List of Document objects
+            library_id: Library identifier
+
+        Returns:
+            Compact summary markdown
+        """
+        output = [f"# Summary: {library_id}\n\n"]
+
+        # Sort by quality score
+        scored_docs = []
+        for doc in documents:
+            if self.should_exclude_file(doc.file_path):
+                continue
+            if len(doc.content.strip()) < 100:
+                continue
+            quality = self.calculate_quality_score(doc.content, doc.file_path)
+            scored_docs.append((doc, quality))
+
+        scored_docs.sort(key=lambda x: x[1], reverse=True)
+
+        for doc, quality in scored_docs[:10]:  # Limit to top 10 docs
+            title = self.extract_title(doc.content, doc.file_path)
+            doc_type = self.classify_document(doc.content, doc.file_path)
+
+            # Get first 1-2 sentences as description
+            description = self.extract_description(doc.content, max_sentences=2)
+
+            # Extract main headings (## level)
+            headings = re.findall(r'^##\s+(.+?)$', doc.content, re.MULTILINE)
+            headings = [h.strip() for h in headings[:5]]  # Limit to 5 headings
+
+            output.append(f"## {title}\n")
+            output.append(f"*{doc.file_path}* ({doc_type}, score: {quality:.0f})\n\n")
+
+            if description:
+                output.append(f"{description}\n\n")
+
+            if headings:
+                output.append("Sections: " + ", ".join(headings) + "\n")
+
+            output.append("\n")
+
+        # Add note about truncation
+        total_docs = len([d for d in documents if not self.should_exclude_file(d.file_path)])
+        if total_docs > 10:
+            output.append(f"\n---\n*Showing top 10 of {total_docs} documents. Use output_mode='standard' for full content.*\n")
+
+        return "".join(output)
+
+    def calculate_relevance_score(self, content: str, file_path: str, query: str) -> float:
+        """
+        Calculate relevance score for a document given a query (0-100).
+
+        Scoring factors:
+        - Keyword matches in title (highest weight)
+        - Keyword matches in headings
+        - Keyword matches in content
+        - Proximity of keywords
+
+        Args:
+            content: Document content
+            file_path: File path
+            query: Search query string
+
+        Returns:
+            Relevance score from 0 to 100
+        """
+        if not query:
+            return 0.0
+
+        score = 0.0
+        query_lower = query.lower()
+
+        # Extract keywords from query (simple tokenization)
+        keywords = set(word.strip() for word in re.split(r'[\s,;:]+', query_lower) if len(word.strip()) > 2)
+
+        if not keywords:
+            return 0.0
+
+        title = self.extract_title(content, file_path).lower()
+        path_lower = file_path.lower()
+        content_lower = content.lower()
+
+        # Title matches (0-40 points)
+        title_matches = sum(1 for kw in keywords if kw in title)
+        if title_matches:
+            score += min(40, title_matches * 20)  # 20 points per keyword match in title
+
+        # File path matches (0-20 points)
+        path_matches = sum(1 for kw in keywords if kw in path_lower)
+        if path_matches:
+            score += min(20, path_matches * 10)  # 10 points per keyword match in path
+
+        # Heading matches (0-20 points)
+        headings = ' '.join(re.findall(r'^#{1,3}\s+(.+?)$', content, re.MULTILINE)).lower()
+        heading_matches = sum(1 for kw in keywords if kw in headings)
+        if heading_matches:
+            score += min(20, heading_matches * 10)  # 10 points per keyword match in headings
+
+        # Content matches (0-20 points)
+        content_matches = sum(1 for kw in keywords if kw in content_lower)
+        if content_matches:
+            # More matches = higher score, but capped
+            score += min(20, content_matches * 5)  # 5 points per keyword in content
+
+        return min(100.0, score)
+
+    def format_full_for_llm(self, documents: list, library_id: str) -> str:
+        """
+        Format all documents without filtering for FULL output mode.
+
+        Includes everything:
+        - All documents (no priority filtering)
+        - All code examples (no snippet filtering)
+        - Test files and low-quality docs included
+
+        Args:
+            documents: List of Document objects
+            library_id: Library identifier
+
+        Returns:
+            Complete documentation markdown
+        """
+        output = []
+
+        for doc in documents:
+            # Skip only truly empty files
+            if len(doc.content.strip()) < 10:
+                continue
+
+            title = self.extract_title(doc.content, doc.file_path)
+            full_content = self.extract_full_content(doc.content)
+
+            output.append(f"# {doc.file_path}\n\n")
+            output.append(full_content.strip())
+            output.append("\n\n---\n\n")
+
+        return "".join(output)

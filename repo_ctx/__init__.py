@@ -1,6 +1,6 @@
 """GitLab Context - MCP server for GitLab repository documentation."""
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 # Core classes
 from .core import GitLabContext, RepositoryContext

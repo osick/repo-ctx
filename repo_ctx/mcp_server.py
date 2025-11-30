@@ -6,172 +6,12 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 from .core import GitLabContext
 from .config import Config
-
-
-def parse_repo_id(repo_id: str) -> Tuple[str, str]:
-    """Parse repo_id into (group, project) tuple."""
-    clean_id = repo_id.strip("/")
-    parts = clean_id.split("/")
-    if len(parts) >= 2:
-        project = parts[-1]
-        group = "/".join(parts[:-1])
-        return (group, project)
-    return (clean_id, "")
-
-
-async def get_or_analyze_repo(context: GitLabContext, repo_id: str, force_refresh: bool = False):
-    """Get stored analysis for a repo, or analyze and store it.
-
-    Returns: (symbols, lib, error_message)
-    """
-    from .analysis import CodeAnalyzer, Symbol, SymbolType
-    from .providers import ProviderFactory
-
-    group, project = parse_repo_id(repo_id)
-    lib = await context.storage.get_library(group, project)
-
-    if not lib:
-        return None, None, f"Repository {repo_id} not found in index. Use repo-ctx-index first."
-
-    # Check if we have stored symbols
-    stored_symbols = await context.storage.search_symbols(lib.id, "")
-
-    if stored_symbols and not force_refresh:
-        # Return stored symbols
-        symbols = []
-        for s in stored_symbols:
-            # Parse metadata from JSON string
-            metadata = {}
-            if s.get('metadata'):
-                try:
-                    metadata = json.loads(s['metadata']) if isinstance(s['metadata'], str) else s['metadata']
-                except (json.JSONDecodeError, TypeError):
-                    metadata = {}
-
-            symbols.append(Symbol(
-                name=s['name'],
-                symbol_type=SymbolType(s['symbol_type']),
-                file_path=s['file_path'],
-                line_start=s['line_start'],
-                line_end=s['line_end'],
-                signature=s.get('signature'),
-                visibility=s.get('visibility', 'public'),
-                language=s.get('language', 'unknown'),
-                qualified_name=s.get('qualified_name'),
-                documentation=s.get('documentation'),
-                is_exported=s.get('is_exported', True),
-                metadata=metadata
-            ))
-        return symbols, lib, None
-
-    # Need to fetch and analyze - use git clone for efficiency
-    import shutil
-    import tempfile
-    import subprocess
-    import os
-
-    def clone_repo_to_temp(clone_url: str) -> str:
-        """Clone repo to temp directory using shallow clone."""
-        temp_dir = tempfile.mkdtemp(prefix="repo_ctx_")
-        try:
-            cmd = ["git", "clone", "--depth", "1", clone_url, temp_dir]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            if result.returncode != 0:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                raise RuntimeError(f"Git clone failed: {result.stderr}")
-            return temp_dir
-        except subprocess.TimeoutExpired:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            raise RuntimeError("Git clone timed out")
-
-    def analyze_local_directory(repo_path: str, analyzer) -> dict:
-        """Analyze all code files in a local directory."""
-        # Directories to skip (virtual envs, caches, build artifacts)
-        skip_dirs = {
-            '.git', '.venv', 'venv', 'env', '.env',
-            'node_modules', '__pycache__', '.pytest_cache',
-            '.mypy_cache', '.ruff_cache', '.tox',
-            'dist', 'build', 'egg-info', '.eggs',
-            'htmlcov', '.coverage', 'coverage',
-            '.idea', '.vscode', '.vs',
-            'vendor', 'third_party', 'external',
-            'tests', 'test', 'spec', 'specs', '__tests__'
-        }
-
-        files = {}
-        for root, dirs, filenames in os.walk(repo_path):
-            # Remove directories we want to skip
-            dirs[:] = [d for d in dirs if d not in skip_dirs and not d.endswith('.egg-info')]
-
-            for filename in filenames:
-                # Skip test files
-                if filename.startswith('test_') or filename.endswith('_test.py'):
-                    continue
-                if filename.startswith('spec_') or filename.endswith('.spec.js'):
-                    continue
-
-                full_path = os.path.join(root, filename)
-                rel_path = os.path.relpath(full_path, repo_path)
-                if analyzer.detect_language(rel_path):
-                    try:
-                        with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            files[rel_path] = f.read()
-                    except Exception:
-                        continue
-        return files
-
-    def get_clone_url(provider_type: str, group: str, project: str, config) -> str:
-        """Get the clone URL for a repository."""
-        if provider_type == "github":
-            token = getattr(config, 'github_token', None)
-            if token:
-                return f"https://{token}@github.com/{group}/{project}.git"
-            return f"https://github.com/{group}/{project}.git"
-        elif provider_type == "gitlab":
-            base_url = getattr(config, 'gitlab_url', "https://gitlab.com").rstrip('/')
-            from urllib.parse import urlparse
-            host = urlparse(base_url).netloc or urlparse(base_url).path
-            token = getattr(config, 'gitlab_token', None)
-            if token:
-                return f"https://oauth2:{token}@{host}/{group}/{project}.git"
-            return f"https://{host}/{group}/{project}.git"
-        else:
-            raise ValueError(f"Unsupported provider for clone: {provider_type}")
-
-    temp_dir = None
-    try:
-        config = context.config
-        analyzer = CodeAnalyzer()
-
-        # For local provider, analyze directly
-        if lib.provider == "local":
-            repo_path = f"{group}/{project}" if project else group
-            files = analyze_local_directory(repo_path, analyzer)
-        else:
-            # Clone repo to temp directory (single operation, no API rate limits)
-            clone_url = get_clone_url(lib.provider, group, project, config)
-            temp_dir = clone_repo_to_temp(clone_url)
-            files = analyze_local_directory(temp_dir, analyzer)
-
-        if not files:
-            return [], lib, None
-
-        # Analyze all files
-        analysis_results = analyzer.analyze_files(files)
-        symbols = analyzer.aggregate_symbols(analysis_results)
-
-        # Store symbols in database
-        await context.storage.save_symbols(symbols, lib.id)
-
-        return symbols, lib, None
-
-    except Exception as e:
-        return None, lib, str(e)
-
-    finally:
-        # Clean up temp directory
-        if temp_dir:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+from .models import OutputMode
+from .operations import (
+    parse_repo_id,
+    get_or_analyze_repo,
+    parse_include_options,
+)
 
 
 async def serve(
@@ -326,6 +166,16 @@ async def serve(
                             "type": "array",
                             "items": {"type": "string"},
                             "description": "Additional content to include. Options: 'code' (structure), 'symbols' (detailed info), 'diagrams' (mermaid), 'tests' (include test code), 'examples' (all doc snippets), 'all'. Example: ['code', 'diagrams']"
+                        },
+                        "outputMode": {
+                            "type": "string",
+                            "enum": ["summary", "standard", "full"],
+                            "description": "Output detail level. 'summary': titles and descriptions only (~500-2000 tokens). 'standard': balanced content with quality filtering (default). 'full': everything including tests and low-quality docs.",
+                            "default": "standard"
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Search query for relevance-based filtering. Documents matching the query are prioritized. Example: 'authentication oauth' to find docs about auth."
                         },
                         "refresh": {
                             "type": "boolean",
@@ -516,6 +366,30 @@ async def serve(
                         }
                     }
                 }
+            ),
+            Tool(
+                name="repo-ctx-llmstxt",
+                description="Generate a compact llms.txt summary for a repository (<2000 tokens). Ideal for quick context loading. Returns project overview, key files, quickstart guide, and documentation links in a standardized format.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "libraryId": {
+                            "type": "string",
+                            "description": "Library ID in format /group/project or /group/project/version"
+                        },
+                        "includeApi": {
+                            "type": "boolean",
+                            "description": "Include API overview section (default: true)",
+                            "default": True
+                        },
+                        "includeQuickstart": {
+                            "type": "boolean",
+                            "description": "Include getting started section (default: true)",
+                            "default": True
+                        }
+                    },
+                    "required": ["libraryId"]
+                }
             )
         ]
 
@@ -633,6 +507,13 @@ async def serve(
             max_tokens = arguments.get("maxTokens")
             include_metadata = arguments.get("includeMetadata", False)
             refresh = arguments.get("refresh", False)
+            output_mode_str = arguments.get("outputMode", "standard")
+
+            # Parse output mode
+            try:
+                output_mode = OutputMode.from_string(output_mode_str)
+            except ValueError:
+                output_mode = OutputMode.STANDARD
 
             # Parse include options (array of strings)
             include_list = arguments.get("include", [])
@@ -648,13 +529,18 @@ async def serve(
             include_tests = 'tests' in include_opts
             include_examples = 'examples' in include_opts
 
+            # Get query for relevance filtering
+            query = arguments.get("query")
+
             try:
                 result = await context.get_documentation(
                     library_id,
                     topic,
                     page,
                     max_tokens=max_tokens,
-                    include_examples=include_examples
+                    include_examples=include_examples,
+                    output_mode=output_mode,
+                    query=query
                 )
 
                 # Build response text
@@ -1382,6 +1268,48 @@ async def serve(
 
             except Exception as e:
                 return [TextContent(type="text", text=f"Error generating dependency graph: {str(e)}")]
+
+        elif name == "repo-ctx-llmstxt":
+            from .llmstxt import LlmsTxtGenerator
+
+            library_id = arguments.get("libraryId")
+            include_api = arguments.get("includeApi", True)
+            include_quickstart = arguments.get("includeQuickstart", True)
+
+            if not library_id:
+                return [TextContent(type="text", text="Error: libraryId is required")]
+
+            try:
+                # Parse library ID
+                group, project = parse_repo_id(library_id)
+
+                # Get library
+                lib = await context.storage.get_library(group, project)
+                if not lib:
+                    return [TextContent(type="text", text=f"Error: Library not found: {library_id}")]
+
+                # Get default version
+                version_id = await context.storage.get_version_id(lib.id, lib.default_version)
+                if not version_id:
+                    return [TextContent(type="text", text=f"Error: No version found for {library_id}")]
+
+                # Get documents
+                documents = await context.storage.get_documents(version_id)
+
+                # Generate llms.txt
+                generator = LlmsTxtGenerator()
+                llmstxt = generator.generate(
+                    documents,
+                    library_id,
+                    description=lib.description,
+                    include_api=include_api,
+                    include_quickstart=include_quickstart
+                )
+
+                return [TextContent(type="text", text=llmstxt)]
+
+            except Exception as e:
+                return [TextContent(type="text", text=f"Error generating llms.txt: {str(e)}")]
 
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]

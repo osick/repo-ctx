@@ -13,327 +13,24 @@ from rich.panel import Panel
 from rich.markup import escape as rich_escape
 from rich import box
 
+from ..models import OutputMode
+from ..operations import (
+    parse_repo_id,
+    is_local_path,
+    clone_repo_to_temp,
+    analyze_local_directory,
+    get_clone_url,
+    parse_include_options,
+    get_or_analyze_repo_standalone,
+    VALID_INCLUDE_OPTIONS,
+)
+
 console = Console()
 
 
 def print_error(message: str):
     """Print an error message, escaping any rich markup in the message."""
     console.print(f"[red]Error: {rich_escape(str(message))}[/red]")
-
-
-def parse_repo_id(repo_id: str) -> Tuple[str, str]:
-    """Parse repo_id into (group, project) tuple."""
-    clean_id = repo_id.strip("/")
-    parts = clean_id.split("/")
-    if len(parts) >= 2:
-        project = parts[-1]
-        group = "/".join(parts[:-1])
-        return (group, project)
-    return (clean_id, "")
-
-
-# Valid include options for --include flag
-VALID_INCLUDE_OPTIONS = {'code', 'symbols', 'diagrams', 'tests', 'examples', 'all'}
-
-
-def parse_include_options(include_str: Optional[str]) -> dict:
-    """Parse --include flag into option dictionary.
-
-    Args:
-        include_str: Comma-separated string like "code,diagrams,tests"
-
-    Returns:
-        Dictionary with boolean flags:
-        - include_code: Include code structure (symbol lists)
-        - include_symbols: Include detailed symbol info
-        - include_diagrams: Include mermaid diagrams
-        - include_tests: Include test files/symbols
-        - include_examples: Include all doc code examples (override filtering)
-    """
-    result = {
-        'include_code': False,
-        'include_symbols': False,
-        'include_diagrams': False,
-        'include_tests': False,
-        'include_examples': False,
-    }
-
-    if not include_str:
-        return result
-
-    options = {opt.strip().lower() for opt in include_str.split(',')}
-
-    # Validate options
-    invalid = options - VALID_INCLUDE_OPTIONS
-    if invalid:
-        console.print(f"[yellow]Warning: Unknown include options ignored: {', '.join(invalid)}[/yellow]")
-        console.print(f"[dim]Valid options: {', '.join(sorted(VALID_INCLUDE_OPTIONS))}[/dim]")
-
-    # Handle 'all' - enables everything
-    if 'all' in options:
-        return {
-            'include_code': True,
-            'include_symbols': True,
-            'include_diagrams': True,
-            'include_tests': True,
-            'include_examples': True,
-        }
-
-    # Set individual flags
-    result['include_code'] = 'code' in options
-    result['include_symbols'] = 'symbols' in options
-    result['include_diagrams'] = 'diagrams' in options
-    result['include_tests'] = 'tests' in options
-    result['include_examples'] = 'examples' in options
-
-    return result
-
-
-def clone_repo_to_temp(clone_url: str, ref: str = None) -> str:
-    """Clone a repository to a temporary directory using shallow clone.
-
-    Args:
-        clone_url: Git clone URL (https or ssh)
-        ref: Optional branch/tag to checkout
-
-    Returns:
-        Path to the cloned repository
-
-    Raises:
-        RuntimeError: If clone fails
-    """
-    import tempfile
-    import subprocess
-
-    # Create temp directory
-    temp_dir = tempfile.mkdtemp(prefix="repo_ctx_")
-
-    try:
-        # Build clone command - shallow clone for speed
-        cmd = ["git", "clone", "--depth", "1"]
-        if ref:
-            cmd.extend(["--branch", ref])
-        cmd.extend([clone_url, temp_dir])
-
-        # Run clone
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=120  # 2 minute timeout
-        )
-
-        if result.returncode != 0:
-            # Clean up on failure
-            import shutil
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            raise RuntimeError(f"Git clone failed: {result.stderr}")
-
-        return temp_dir
-
-    except subprocess.TimeoutExpired:
-        import shutil
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        raise RuntimeError("Git clone timed out")
-
-
-def analyze_local_directory(repo_path: str, analyzer, exclude_tests: bool = True) -> dict:
-    """Analyze all code files in a local directory.
-
-    Args:
-        repo_path: Path to the repository
-        analyzer: CodeAnalyzer instance
-        exclude_tests: If True, exclude test files and directories
-
-    Returns:
-        Dictionary of {relative_path: content}
-    """
-    import os
-
-    # Directories to always skip (virtual envs, caches, build artifacts)
-    skip_dirs = {
-        '.git', '.venv', 'venv', 'env', '.env',
-        'node_modules', '__pycache__', '.pytest_cache',
-        '.mypy_cache', '.ruff_cache', '.tox',
-        'dist', 'build', 'egg-info', '.eggs',
-        'htmlcov', '.coverage', 'coverage',
-        '.idea', '.vscode', '.vs',
-        'vendor', 'third_party', 'external',
-    }
-
-    # Test directories to skip if exclude_tests is True
-    test_dirs = {'tests', 'test', 'spec', 'specs', '__tests__'}
-
-    files = {}
-    for root, dirs, filenames in os.walk(repo_path):
-        # Remove directories we want to skip
-        dirs[:] = [d for d in dirs if d not in skip_dirs and not d.endswith('.egg-info')]
-
-        # Also skip test directories if requested
-        if exclude_tests:
-            dirs[:] = [d for d in dirs if d not in test_dirs]
-
-        for filename in filenames:
-            # Skip test files if exclude_tests is True
-            if exclude_tests:
-                if filename.startswith('test_') or filename.endswith('_test.py'):
-                    continue
-                if filename.startswith('spec_') or filename.endswith('.spec.js'):
-                    continue
-
-            full_path = os.path.join(root, filename)
-            rel_path = os.path.relpath(full_path, repo_path)
-
-            # Check if it's a code file we can analyze
-            if analyzer.detect_language(rel_path):
-                try:
-                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
-                        files[rel_path] = f.read()
-                except Exception:
-                    continue
-
-    return files
-
-
-def get_clone_url(provider_type: str, group: str, project: str, config) -> str:
-    """Get the clone URL for a repository.
-
-    Args:
-        provider_type: 'github', 'gitlab', or 'local'
-        group: Repository group/owner
-        project: Repository name
-        config: Config object
-
-    Returns:
-        Clone URL string
-    """
-    if provider_type == "github":
-        # Use HTTPS with token if available
-        token = config.github_token if hasattr(config, 'github_token') else None
-        if token:
-            return f"https://{token}@github.com/{group}/{project}.git"
-        return f"https://github.com/{group}/{project}.git"
-    elif provider_type == "gitlab":
-        base_url = config.gitlab_url if hasattr(config, 'gitlab_url') else "https://gitlab.com"
-        base_url = base_url.rstrip('/')
-        # Extract host from URL
-        from urllib.parse import urlparse
-        parsed = urlparse(base_url)
-        host = parsed.netloc or parsed.path
-        token = config.gitlab_token if hasattr(config, 'gitlab_token') else None
-        if token:
-            return f"https://oauth2:{token}@{host}/{group}/{project}.git"
-        return f"https://{host}/{group}/{project}.git"
-    else:
-        raise ValueError(f"Unsupported provider for clone: {provider_type}")
-
-
-def is_local_path(path: str) -> bool:
-    """Check if a path looks like a local filesystem path."""
-    if not path:
-        return False
-    # Check common Unix path prefixes
-    if path.startswith(("/home/", "/usr/", "/opt/", "/tmp/", "/var/", "/mnt/", "/media/", "/root/")):
-        return True
-    # Check if it's an absolute path with more than 3 parts
-    parts = path.strip("/").split("/")
-    if len(parts) > 3 and parts[0] in ('home', 'usr', 'opt', 'tmp', 'var', 'mnt', 'media', 'root'):
-        return True
-    return False
-
-
-async def get_or_analyze_repo(repo_id: str, force_refresh: bool = False):
-    """Get stored analysis for a repo, or analyze and store it.
-
-    Uses git clone for efficient bulk file loading instead of per-file API calls.
-    """
-    import shutil
-    from ..config import Config
-    from ..core import GitLabContext
-    from ..analysis import CodeAnalyzer, Symbol, SymbolType
-    from ..providers import ProviderFactory
-
-    config = Config.load()
-    context = GitLabContext(config)
-    await context.init()
-
-    # Handle local paths differently - stored with full path as group, empty project
-    if is_local_path(repo_id):
-        group = repo_id.rstrip("/")
-        project = ""
-    else:
-        group, project = parse_repo_id(repo_id)
-
-    lib = await context.storage.get_library(group, project)
-
-    if not lib:
-        return None, None, f"Repository {repo_id} not found in index. Use 'repo-ctx repo index {repo_id}' first."
-
-    # Check if we have stored symbols
-    stored_symbols = await context.storage.search_symbols(lib.id, "")
-
-    if stored_symbols and not force_refresh:
-        # Return stored symbols
-        symbols = []
-        for s in stored_symbols:
-            # Parse metadata from JSON string
-            metadata = {}
-            if s.get('metadata'):
-                try:
-                    metadata = json.loads(s['metadata']) if isinstance(s['metadata'], str) else s['metadata']
-                except (json.JSONDecodeError, TypeError):
-                    metadata = {}
-
-            symbols.append(Symbol(
-                name=s['name'],
-                symbol_type=SymbolType(s['symbol_type']),
-                file_path=s['file_path'],
-                line_start=s['line_start'],
-                line_end=s['line_end'],
-                signature=s.get('signature'),
-                visibility=s.get('visibility', 'public'),
-                language=s.get('language', 'unknown'),
-                qualified_name=s.get('qualified_name'),
-                documentation=s.get('documentation'),
-                is_exported=s.get('is_exported', True),
-                metadata=metadata
-            ))
-        return symbols, lib, None
-
-    # Need to fetch and analyze - use git clone for efficiency
-    temp_dir = None
-    try:
-        analyzer = CodeAnalyzer()
-
-        # For local provider, analyze directly
-        if lib.provider == "local":
-            repo_path = f"{group}/{project}" if project else group
-            files = analyze_local_directory(repo_path, analyzer)
-        else:
-            # Clone repo to temp directory (single operation, no API rate limits)
-            clone_url = get_clone_url(lib.provider, group, project, config)
-            temp_dir = clone_repo_to_temp(clone_url)
-            files = analyze_local_directory(temp_dir, analyzer)
-
-        if not files:
-            return [], lib, None
-
-        # Analyze all files
-        analysis_results = analyzer.analyze_files(files)
-        symbols = analyzer.aggregate_symbols(analysis_results)
-
-        # Store symbols in database
-        await context.storage.save_symbols(symbols, lib.id)
-
-        return symbols, lib, None
-
-    except Exception as e:
-        return None, lib, str(e)
-
-    finally:
-        # Clean up temp directory
-        if temp_dir:
-            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def run_command(args):
@@ -356,7 +53,7 @@ def run_command(args):
 async def handle_repo_command(args):
     """Handle repo subcommands."""
     if not args.repo_command:
-        console.print("[yellow]Usage: repo-ctx repo <index|search|list|docs>[/yellow]")
+        console.print("[yellow]Usage: repo-ctx repo <index|search|list|docs|llmstxt>[/yellow]")
         return
 
     if args.repo_command == "index":
@@ -367,6 +64,8 @@ async def handle_repo_command(args):
         await repo_list(args)
     elif args.repo_command == "docs":
         await repo_docs(args)
+    elif args.repo_command == "llmstxt":
+        await repo_llmstxt(args)
 
 
 async def repo_index(args):
@@ -574,12 +273,24 @@ async def repo_docs(args):
         include_opts = parse_include_options(include_str)
         force_refresh = getattr(args, 'refresh', False)
 
+        # Parse output mode
+        output_mode_str = getattr(args, 'output_mode', 'standard')
+        try:
+            output_mode = OutputMode.from_string(output_mode_str)
+        except ValueError:
+            output_mode = OutputMode.STANDARD
+
+        # Get query for relevance filtering
+        query = getattr(args, 'query', None)
+
         result = await context.get_documentation(
             args.id,
             topic=args.topic,
             page=args.page,
             max_tokens=args.max_tokens,
-            include_examples=include_opts['include_examples']
+            include_examples=include_opts['include_examples'],
+            output_mode=output_mode,
+            query=query
         )
 
         # If any code-related include options are set, append code analysis
@@ -592,7 +303,7 @@ async def repo_docs(args):
             from ..analysis import CodeAnalysisReport
 
             # Get symbols for the repository (force_refresh to re-analyze if requested)
-            symbols, lib, error = await get_or_analyze_repo(args.id, force_refresh=force_refresh)
+            symbols, lib, error = await get_or_analyze_repo_standalone(args.id, force_refresh=force_refresh)
 
             if not error and symbols:
                 # Generate code analysis report with options
@@ -636,6 +347,67 @@ async def repo_docs(args):
         sys.exit(1)
 
 
+async def repo_llmstxt(args):
+    """Generate llms.txt summary for a repository."""
+    from ..config import Config
+    from ..core import GitLabContext
+    from ..llmstxt import LlmsTxtGenerator
+    from ..operations import parse_repo_id
+
+    try:
+        config = Config.load(config_path=args.config)
+        context = GitLabContext(config)
+        await context.init()
+
+        # Parse library ID
+        library_id = args.id
+        group, project = parse_repo_id(library_id)
+
+        # Get library
+        lib = await context.storage.get_library(group, project)
+        if not lib:
+            console.print(f"[red]Error: Library not found: {library_id}[/red]")
+            sys.exit(1)
+
+        # Get default version
+        version_id = await context.storage.get_version_id(lib.id, lib.default_version)
+        if not version_id:
+            console.print(f"[red]Error: No version found for {library_id}[/red]")
+            sys.exit(1)
+
+        # Get documents
+        documents = await context.storage.get_documents(version_id)
+
+        # Generate llms.txt
+        generator = LlmsTxtGenerator()
+        llmstxt = generator.generate(
+            documents,
+            library_id,
+            description=lib.description,
+            include_api=not getattr(args, 'no_api', False),
+            include_quickstart=not getattr(args, 'no_quickstart', False)
+        )
+
+        # Output
+        if args.output == "json":
+            import json
+            output = {
+                "library_id": library_id,
+                "content": llmstxt
+            }
+            print(json.dumps(output, indent=2))
+        else:
+            print(llmstxt)
+
+    except Exception as e:
+        if args.output == "json":
+            import json
+            print(json.dumps({"status": "error", "message": str(e)}))
+        else:
+            print_error(e)
+        sys.exit(1)
+
+
 # ============================================================================
 # CODE COMMANDS
 # ============================================================================
@@ -672,7 +444,7 @@ async def code_analyze(args):
         if getattr(args, 'repo', False):
             # Use indexed repository
             force_refresh = getattr(args, 'refresh', False)
-            symbols, lib, error = await get_or_analyze_repo(args.path, force_refresh=force_refresh)
+            symbols, lib, error = await get_or_analyze_repo_standalone(args.path, force_refresh=force_refresh)
 
             if error:
                 if args.output == "json":
@@ -806,7 +578,7 @@ async def code_find(args):
 
         # Check if using indexed repo
         if getattr(args, 'repo', False):
-            symbols, lib, error = await get_or_analyze_repo(args.path)
+            symbols, lib, error = await get_or_analyze_repo_standalone(args.path)
 
             if error:
                 if args.output == "json":
@@ -929,7 +701,7 @@ async def code_info(args):
 
         # Check if using indexed repo
         if getattr(args, 'repo', False):
-            symbols, lib, error = await get_or_analyze_repo(args.path)
+            symbols, lib, error = await get_or_analyze_repo_standalone(args.path)
 
             if error:
                 if args.output == "json":
@@ -1165,7 +937,7 @@ async def code_dep(args):
                 console.print("[red]Error: Path is required when using --repo[/red]")
                 sys.exit(1)
 
-            symbols, lib, error = await get_or_analyze_repo(args.path)
+            symbols, lib, error = await get_or_analyze_repo_standalone(args.path)
 
             if error:
                 print(json.dumps({"status": "error", "message": error}))

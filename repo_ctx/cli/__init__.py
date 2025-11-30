@@ -129,6 +129,23 @@ Run 'repo-ctx <command> --help' for command details.
                                "tests (include test code), examples (all doc snippets), all")
     repo_docs.add_argument("--refresh", action="store_true",
                           help="Force re-analysis of code (ignore cached symbols)")
+    repo_docs.add_argument("--output-mode", choices=["summary", "standard", "full"],
+                          default="standard",
+                          help="Output detail level: summary (compact), standard (default), full (everything)")
+    repo_docs.add_argument("--query", "-q",
+                          help="Search query for relevance-based filtering (prioritizes matching docs)")
+
+    # repo llmstxt
+    repo_llmstxt = repo_subparsers.add_parser(
+        "llmstxt",
+        help="Generate llms.txt summary for a repository",
+        description="Generate compact llms.txt summary (<2000 tokens) for quick LLM context"
+    )
+    repo_llmstxt.add_argument("id", help="Repository ID (e.g., /owner/repo)")
+    repo_llmstxt.add_argument("--no-api", action="store_true",
+                              help="Exclude API overview section")
+    repo_llmstxt.add_argument("--no-quickstart", action="store_true",
+                              help="Exclude getting started section")
 
     # === CODE commands ===
     code_parser = subparsers.add_parser(

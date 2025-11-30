@@ -1,7 +1,7 @@
 """Tests for data models."""
 import pytest
 from datetime import datetime
-from repo_ctx.models import Library, Version, Document, SearchResult, FuzzySearchResult
+from repo_ctx.models import Library, Version, Document, SearchResult, FuzzySearchResult, OutputMode
 
 
 class TestLibrary:
@@ -220,3 +220,49 @@ class TestFuzzySearchResult:
         )
         assert result.match_type == "fuzzy"
         assert result.score < 1.0
+
+
+class TestOutputMode:
+    """Tests for OutputMode enum."""
+
+    def test_from_string_summary(self):
+        """Test parsing 'summary' mode."""
+        mode = OutputMode.from_string("summary")
+        assert mode == OutputMode.SUMMARY
+
+    def test_from_string_standard(self):
+        """Test parsing 'standard' mode."""
+        mode = OutputMode.from_string("standard")
+        assert mode == OutputMode.STANDARD
+
+    def test_from_string_full(self):
+        """Test parsing 'full' mode."""
+        mode = OutputMode.from_string("full")
+        assert mode == OutputMode.FULL
+
+    def test_from_string_case_insensitive(self):
+        """Test case insensitive parsing."""
+        assert OutputMode.from_string("SUMMARY") == OutputMode.SUMMARY
+        assert OutputMode.from_string("Standard") == OutputMode.STANDARD
+        assert OutputMode.from_string("FULL") == OutputMode.FULL
+
+    def test_from_string_empty_returns_standard(self):
+        """Test empty string returns standard mode."""
+        mode = OutputMode.from_string("")
+        assert mode == OutputMode.STANDARD
+
+    def test_from_string_none_returns_standard(self):
+        """Test None returns standard mode."""
+        mode = OutputMode.from_string(None)
+        assert mode == OutputMode.STANDARD
+
+    def test_from_string_invalid_raises_error(self):
+        """Test invalid value raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid output mode"):
+            OutputMode.from_string("invalid")
+
+    def test_values(self):
+        """Test enum values."""
+        assert OutputMode.SUMMARY.value == "summary"
+        assert OutputMode.STANDARD.value == "standard"
+        assert OutputMode.FULL.value == "full"

@@ -1,7 +1,34 @@
 """Data models."""
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Optional
+
+
+class OutputMode(Enum):
+    """Output mode for documentation retrieval.
+
+    - SUMMARY: Titles, descriptions, and key methods only (~500-2000 tokens)
+              Optimized for LLM context efficiency
+    - STANDARD: Current behavior with quality-based truncation
+               Good balance of detail and size
+    - FULL: Everything including tests and low-quality docs
+            Complete documentation dump
+    """
+    SUMMARY = "summary"
+    STANDARD = "standard"
+    FULL = "full"
+
+    @classmethod
+    def from_string(cls, value: str) -> "OutputMode":
+        """Create OutputMode from string value."""
+        if not value:
+            return cls.STANDARD
+        normalized = value.lower().strip()
+        for mode in cls:
+            if mode.value == normalized:
+                return mode
+        raise ValueError(f"Invalid output mode: {value}. Valid modes: {[m.value for m in cls]}")
 
 
 @dataclass

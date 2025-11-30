@@ -3,7 +3,7 @@ from typing import Optional, Dict
 from .config import Config
 from .storage import Storage
 from .parser import Parser
-from .models import Library, Version, Document, SearchResult
+from .models import Library, Version, Document, SearchResult, OutputMode
 from .providers import (
     GitProvider,
     ProviderFactory,
@@ -221,7 +221,9 @@ class RepositoryContext:
         topic: Optional[str] = None,
         page: int = 1,
         max_tokens: Optional[int] = None,
-        include_examples: bool = False
+        include_examples: bool = False,
+        output_mode: OutputMode = OutputMode.STANDARD,
+        query: Optional[str] = None
     ) -> dict:
         """
         Get documentation for a library.
@@ -232,6 +234,8 @@ class RepositoryContext:
             page: Page number for pagination (ignored if max_tokens specified)
             max_tokens: Maximum tokens to return (preferred over page-based)
             include_examples: If True, include all code examples (override smart filtering)
+            output_mode: Output detail level (SUMMARY, STANDARD, FULL)
+            query: Optional search query for relevance-based filtering
 
         Returns:
             Documentation content and metadata
@@ -313,12 +317,43 @@ class RepositoryContext:
 
         # Token-based limiting: format incrementally if max_tokens specified
         if max_tokens:
+            # Calculate quality scores and optionally relevance scores
+            scored_docs = []
+            for doc in documents:
+                doc_metadata = self.parser.extract_metadata(doc.content, doc.file_path)
+                quality_score = doc_metadata.get("quality_score", 0)
+
+                # Calculate combined score (quality + relevance if query provided)
+                if query:
+                    relevance_score = self.parser.calculate_relevance_score(doc.content, doc.file_path, query)
+                    # Combined: 50% quality + 50% relevance when query is provided
+                    combined_score = (quality_score * 0.5) + (relevance_score * 0.5)
+                    doc_metadata["relevance_score"] = round(relevance_score, 1)
+                else:
+                    combined_score = quality_score
+                    relevance_score = None
+
+                scored_docs.append({
+                    "doc": doc,
+                    "quality_score": quality_score,
+                    "combined_score": combined_score,
+                    "relevance_score": relevance_score,
+                    "metadata": doc_metadata
+                })
+
+            # Sort by combined score (highest first)
+            scored_docs.sort(key=lambda x: x["combined_score"], reverse=True)
+
             # Format documents one by one and accumulate until token limit
             formatted_docs = []
             docs_metadata = []
             total_tokens = 0
+            truncated_docs = []  # Documents that didn't fit
 
-            for doc in documents:
+            for scored_doc in scored_docs:
+                doc = scored_doc["doc"]
+                doc_metadata = scored_doc["metadata"]
+
                 # Format this single document
                 single_doc_content = self.parser.format_for_llm([doc], library_id, include_examples=include_examples)
                 doc_tokens = self.parser.count_tokens(single_doc_content)
@@ -327,30 +362,71 @@ class RepositoryContext:
                 if total_tokens + doc_tokens <= max_tokens:
                     formatted_docs.append(doc)
                     total_tokens += doc_tokens
-
-                    # Extract metadata for this document
-                    doc_metadata = self.parser.extract_metadata(doc.content, doc.file_path)
                     doc_metadata["file_path"] = doc.file_path
                     docs_metadata.append(doc_metadata)
                 else:
-                    break  # Stop when limit reached
+                    # Track truncated documents for the footer
+                    truncated_info = {
+                        "file_path": doc.file_path,
+                        "quality_score": scored_doc["quality_score"],
+                        "title": self.parser.extract_title(doc.content, doc.file_path)
+                    }
+                    if scored_doc["relevance_score"] is not None:
+                        truncated_info["relevance_score"] = scored_doc["relevance_score"]
+                    truncated_docs.append(truncated_info)
 
-            # Format the selected documents
-            content = self.parser.format_for_llm(formatted_docs, library_id, include_examples=include_examples)
+            # Format the selected documents based on output mode
+            if output_mode == OutputMode.SUMMARY:
+                content = self.parser.format_summary_for_llm(formatted_docs, library_id)
+            elif output_mode == OutputMode.FULL:
+                content = self.parser.format_full_for_llm(formatted_docs, library_id)
+            else:  # STANDARD
+                content = self.parser.format_for_llm(formatted_docs, library_id, include_examples=include_examples)
+
+            # Add truncation footer if there are more documents
+            if truncated_docs:
+                remaining_tokens = max_tokens - total_tokens
+                truncation_footer = f"\n\n---\n**... and {len(truncated_docs)} more document(s) available**\n"
+
+                # Show headers of top truncated documents (up to 5)
+                top_truncated = truncated_docs[:5]
+                if top_truncated:
+                    if query:
+                        truncation_footer += "Additional documents (by relevance + quality):\n"
+                        for td in top_truncated:
+                            rel_info = f", relevance: {td.get('relevance_score', 0):.0f}" if 'relevance_score' in td else ""
+                            truncation_footer += f"- {td['file_path']} (quality: {td['quality_score']:.0f}{rel_info})\n"
+                    else:
+                        truncation_footer += "Additional documents (by quality score):\n"
+                        for td in top_truncated:
+                            truncation_footer += f"- {td['file_path']} (score: {td['quality_score']:.0f})\n"
+                    if len(truncated_docs) > 5:
+                        truncation_footer += f"- ... and {len(truncated_docs) - 5} more\n"
+
+                content += truncation_footer
+
             actual_tokens = self.parser.count_tokens(content)
 
             metadata = {
                 "library": f"{group}/{project}",
                 "version": version,
+                "output_mode": output_mode.value,
+                "query": query,
                 "documents_count": len(formatted_docs),
                 "tokens": actual_tokens,
                 "max_tokens": max_tokens,
                 "documents_available": len(documents),
+                "documents_truncated": len(truncated_docs),
                 "documents_metadata": docs_metadata
             }
         else:
-            # Page-based: format all retrieved documents
-            content = self.parser.format_for_llm(documents, library_id, include_examples=include_examples)
+            # Page-based: format all retrieved documents based on output mode
+            if output_mode == OutputMode.SUMMARY:
+                content = self.parser.format_summary_for_llm(documents, library_id)
+            elif output_mode == OutputMode.FULL:
+                content = self.parser.format_full_for_llm(documents, library_id)
+            else:  # STANDARD
+                content = self.parser.format_for_llm(documents, library_id, include_examples=include_examples)
             actual_tokens = self.parser.count_tokens(content)
 
             # Extract metadata for all documents
@@ -363,6 +439,8 @@ class RepositoryContext:
             metadata = {
                 "library": f"{group}/{project}",
                 "version": version,
+                "output_mode": output_mode.value,
+                "query": query,
                 "documents_count": len(documents),
                 "tokens": actual_tokens,
                 "page": page,
