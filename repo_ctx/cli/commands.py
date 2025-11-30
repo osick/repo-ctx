@@ -53,13 +53,17 @@ def run_command(args):
 async def handle_repo_command(args):
     """Handle repo subcommands."""
     if not args.repo_command:
-        console.print("[yellow]Usage: repo-ctx repo <index|search|list|docs|llmstxt>[/yellow]")
+        console.print("[yellow]Usage: repo-ctx repo <index|index-group|search|find-exact|list|docs|llmstxt>[/yellow]")
         return
 
     if args.repo_command == "index":
         await repo_index(args)
+    elif args.repo_command == "index-group":
+        await repo_index_group(args)
     elif args.repo_command == "search":
         await repo_search(args)
+    elif args.repo_command == "find-exact":
+        await repo_find_exact(args)
     elif args.repo_command == "list":
         await repo_list(args)
     elif args.repo_command == "docs":
@@ -110,8 +114,122 @@ async def repo_index(args):
         sys.exit(1)
 
 
+async def repo_index_group(args):
+    """Index all repositories in a group/organization."""
+    from ..config import Config
+    from ..core import GitLabContext
+
+    group = args.group
+    provider = args.provider
+    # Handle subgroups flag (default True unless --no-subgroups specified)
+    include_subgroups = not getattr(args, 'no_subgroups', False)
+
+    try:
+        config = Config.load(config_path=args.config)
+        context = GitLabContext(config)
+        await context.init()
+
+        # Determine provider type
+        provider_type = None if provider == "auto" else provider
+
+        # Index the group
+        count = await context.index_group(group, include_subgroups=include_subgroups, provider_type=provider_type)
+
+        if args.output == "json":
+            print(json.dumps({
+                "status": "success",
+                "group": group,
+                "repositories_indexed": count,
+                "include_subgroups": include_subgroups
+            }))
+        else:
+            console.print(f"[green]Successfully indexed {count} repositories from '{group}'[/green]")
+            if include_subgroups:
+                console.print("[dim]Including subgroups[/dim]")
+
+    except Exception as e:
+        if args.output == "json":
+            print(json.dumps({"status": "error", "message": str(e)}))
+        else:
+            print_error(e)
+        sys.exit(1)
+
+
+async def repo_find_exact(args):
+    """Find repositories by exact name match."""
+    from ..config import Config
+    from ..core import GitLabContext
+
+    try:
+        config = Config.load(config_path=args.config)
+        context = GitLabContext(config)
+        await context.init()
+
+        results = await context.search_libraries(args.name)
+
+        if args.output == "json":
+            output = {
+                "name": args.name,
+                "count": len(results),
+                "results": [
+                    {
+                        "id": r.library_id,
+                        "name": r.name,
+                        "description": r.description,
+                        "versions": r.versions
+                    }
+                    for r in results
+                ]
+            }
+            print(json.dumps(output, indent=2))
+        elif args.output == "yaml":
+            import yaml
+            output = {
+                "name": args.name,
+                "count": len(results),
+                "results": [
+                    {
+                        "id": r.library_id,
+                        "name": r.name,
+                        "description": r.description,
+                        "versions": r.versions
+                    }
+                    for r in results
+                ]
+            }
+            print(yaml.dump(output, default_flow_style=False))
+        else:
+            if not results:
+                console.print(f"[yellow]No repositories found with exact name '{args.name}'[/yellow]")
+                console.print("[dim]Try 'repo-ctx repo search' for fuzzy matching[/dim]")
+                return
+
+            table = Table(box=box.ROUNDED, show_header=True, title="Exact Match Results")
+            table.add_column("Repository ID", style="green")
+            table.add_column("Name", style="white")
+            table.add_column("Description", style="dim")
+            table.add_column("Versions", style="cyan")
+
+            for r in results:
+                table.add_row(
+                    r.library_id,
+                    r.name,
+                    (r.description or "")[:40],
+                    ", ".join(r.versions[:3]) + ("..." if len(r.versions) > 3 else "")
+                )
+
+            console.print(table)
+
+    except Exception as e:
+        if args.output == "json":
+            print(json.dumps({"status": "error", "message": str(e)}))
+        else:
+            print_error(e)
+        sys.exit(1)
+
+
 async def repo_search(args):
-    """Search for repositories."""
+    """Search for repositories (fuzzy matching)."""
     from ..config import Config
     from ..core import GitLabContext
 
@@ -482,7 +600,7 @@ async def code_analyze(args):
                         file_path = os.path.join(root, filename)
                         lang = analyzer.detect_language(filename)
                         if lang:
-                            if args.lang and lang != args.lang:
+                            if args.language and lang != args.language:
                                 continue
                             try:
                                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -498,9 +616,9 @@ async def code_analyze(args):
             results = analyzer.analyze_files(files)
             all_symbols = analyzer.aggregate_symbols(results)
 
-        # Filter by type
-        if args.type:
-            all_symbols = analyzer.filter_symbols_by_type(all_symbols, SymbolType(args.type))
+        # Filter by symbol type
+        if args.symbol_type:
+            all_symbols = analyzer.filter_symbols_by_type(all_symbols, SymbolType(args.symbol_type))
 
         stats = analyzer.get_statistics(all_symbols)
 
@@ -617,7 +735,7 @@ async def code_find(args):
                         file_path = os.path.join(root, filename)
                         lang = analyzer.detect_language(filename)
                         if lang:
-                            if args.lang and lang != args.lang:
+                            if args.language and lang != args.language:
                                 continue
                             try:
                                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -637,8 +755,8 @@ async def code_find(args):
         query_lower = args.query.lower()
         matching = [s for s in all_symbols if query_lower in s.name.lower()]
 
-        if args.type:
-            matching = analyzer.filter_symbols_by_type(matching, SymbolType(args.type))
+        if args.symbol_type:
+            matching = analyzer.filter_symbols_by_type(matching, SymbolType(args.symbol_type))
 
         # Output
         if args.output == "json":
@@ -926,10 +1044,10 @@ async def code_dep(args):
             "function": GraphType.FUNCTION,
             "symbol": GraphType.SYMBOL
         }
-        graph_type = graph_type_map.get(args.type, GraphType.CLASS)
+        graph_type = graph_type_map.get(args.graph_type, GraphType.CLASS)
 
-        # Determine output format (use --format if provided, else global -o)
-        output_format = getattr(args, 'format', 'json')
+        # Determine output format (use --output-format if provided, else global -o)
+        output_format = getattr(args, 'output_format', 'json')
 
         # Check if using indexed repo
         if getattr(args, 'repo', False):

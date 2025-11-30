@@ -89,8 +89,8 @@ class ProductService:
             path=str(tmp_path),
             query="Service",
             output="text",
-            type=None,
-            lang=None,
+            symbol_type=None,
+            language=None,
             repo=False
         )
         # The command prints to stdout, so we just verify it doesn't crash
@@ -115,8 +115,8 @@ def my_function():
             path=str(tmp_path),
             query="my",
             output="text",
-            type="class",
-            lang=None,
+            symbol_type="class",
+            language=None,
             repo=False
         )
         asyncio.run(code_find(args))
@@ -136,8 +136,8 @@ class TestClass:
             path=str(tmp_path),
             query="Test",
             output="json",
-            type=None,
-            lang=None,
+            symbol_type=None,
+            language=None,
             repo=False
         )
         asyncio.run(code_find(args))
@@ -346,8 +346,8 @@ class MyClass:
             output="text",
             deps=True,
             callgraph=False,
-            type=None,
-            lang=None,
+            symbol_type=None,
+            language=None,
             repo=False,
             refresh=False
         )
@@ -382,8 +382,8 @@ class Calculator:
             output="text",
             deps=False,
             callgraph=False,
-            type=None,
-            lang=None,
+            symbol_type=None,
+            language=None,
             repo=False,
             refresh=False
         )

@@ -97,14 +97,34 @@ Run 'repo-ctx <command> --help' for command details.
     )
     repo_index.add_argument("path", help="Repository path (owner/repo, group/project, or local path)")
 
-    # repo search
+    # repo search (fuzzy search - default)
     repo_search = repo_subparsers.add_parser(
         "search",
-        help="Search indexed repositories",
-        description="Search for repositories by name"
+        help="Search indexed repositories (fuzzy matching)",
+        description="Search for repositories by name with fuzzy matching"
     )
-    repo_search.add_argument("query", help="Search query")
+    repo_search.add_argument("query", help="Search query (supports partial matching)")
     repo_search.add_argument("--limit", "-l", type=int, default=10, help="Max results (default: 10)")
+
+    # repo find-exact (exact name match)
+    repo_find_exact = repo_subparsers.add_parser(
+        "find-exact",
+        help="Find repository by exact name",
+        description="Find repositories by exact name match"
+    )
+    repo_find_exact.add_argument("name", help="Exact repository name to find")
+
+    # repo index-group
+    repo_index_group = repo_subparsers.add_parser(
+        "index-group",
+        help="Index all repositories in a group/organization",
+        description="Index all repositories in a GitLab group or GitHub organization"
+    )
+    repo_index_group.add_argument("group", help="Group or organization name (e.g., 'myorg')")
+    repo_index_group.add_argument("--include-subgroups", action="store_true",
+                                   help="Include subgroups (GitLab only, default: true)")
+    repo_index_group.add_argument("--no-subgroups", action="store_true",
+                                   help="Exclude subgroups (GitLab only)")
 
     # repo list
     repo_list = repo_subparsers.add_parser(
@@ -164,9 +184,11 @@ Run 'repo-ctx <command> --help' for command details.
     code_analyze.add_argument("path", help="Path to file/directory OR repo ID (e.g., /owner/repo)")
     code_analyze.add_argument("--repo", "-r", action="store_true", help="Treat path as indexed repository ID")
     code_analyze.add_argument("--refresh", action="store_true", help="Force re-fetch and re-analyze for repos")
-    code_analyze.add_argument("--lang", "-l", choices=["python", "javascript", "typescript", "java", "kotlin"],
+    code_analyze.add_argument("--language", "--lang", "-l", dest="language",
+                              choices=["python", "javascript", "typescript", "java", "kotlin"],
                               help="Filter by language")
-    code_analyze.add_argument("--type", "-t", choices=["function", "class", "method", "interface", "enum"],
+    code_analyze.add_argument("--symbol-type", "--type", "-t", dest="symbol_type",
+                              choices=["function", "class", "method", "interface", "enum"],
                               help="Filter by symbol type")
     code_analyze.add_argument("--deps", action="store_true", help="Show dependencies")
 
@@ -179,9 +201,11 @@ Run 'repo-ctx <command> --help' for command details.
     code_find.add_argument("path", help="Path to search in OR repo ID (e.g., /owner/repo)")
     code_find.add_argument("query", help="Symbol name or pattern")
     code_find.add_argument("--repo", "-r", action="store_true", help="Treat path as indexed repository ID")
-    code_find.add_argument("--type", "-t", choices=["function", "class", "method", "interface", "enum"],
+    code_find.add_argument("--symbol-type", "--type", "-t", dest="symbol_type",
+                           choices=["function", "class", "method", "interface", "enum"],
                            help="Filter by symbol type")
-    code_find.add_argument("--lang", "-l", choices=["python", "javascript", "typescript", "java", "kotlin"],
+    code_find.add_argument("--language", "--lang", "-l", dest="language",
+                           choices=["python", "javascript", "typescript", "java", "kotlin"],
                            help="Filter by language")
 
     # code info
@@ -211,12 +235,12 @@ Run 'repo-ctx <command> --help' for command details.
     )
     code_dep.add_argument("path", nargs="?", help="Path to file/directory OR repo ID (e.g., /owner/repo)")
     code_dep.add_argument("--repo", "-r", action="store_true", help="Treat path as indexed repository ID")
-    code_dep.add_argument("--type", "-t",
+    code_dep.add_argument("--graph-type", "--type", "-t", dest="graph_type",
                           choices=["file", "module", "class", "function", "symbol"],
                           default="class",
                           help="Graph type (default: class)")
     code_dep.add_argument("--depth", "-d", type=int, help="Maximum traversal depth")
-    code_dep.add_argument("--format", "-f",
+    code_dep.add_argument("--output-format", "--format", "-f", dest="output_format",
                           choices=["json", "dot", "graphml"],
                           default="json",
                           help="Output format (default: json)")

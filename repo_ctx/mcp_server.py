@@ -1,5 +1,6 @@
 """MCP server implementation."""
 import json
+import warnings
 from typing import Tuple, Optional, List
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -11,6 +12,19 @@ from .operations import (
     parse_repo_id,
     get_or_analyze_repo,
     parse_include_options,
+)
+from .tool_names import (
+    get_canonical_name,
+    is_deprecated_name,
+    get_deprecation_message,
+    TOOL_ALIASES,
+)
+from .parameters import (
+    get_repository_id,
+    get_language,
+    get_symbol_type,
+    get_output_format,
+    normalize_arguments,
 )
 
 
@@ -56,23 +70,10 @@ async def serve(
     @server.list_tools()
     async def list_tools() -> list[Tool]:
         return [
+            # Repository Discovery Tools
             Tool(
                 name="repo-ctx-search",
-                description="Search for indexed repositories by exact name match. Returns matching repositories with their IDs and available versions. Works across all providers (local, GitHub, GitLab).",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "libraryName": {
-                            "type": "string",
-                            "description": "Repository name to search for"
-                        }
-                    },
-                    "required": ["libraryName"]
-                }
-            ),
-            Tool(
-                name="repo-ctx-fuzzy-search",
-                description="Fuzzy search for repositories with typo tolerance. Returns top matches even with partial names or typos. Use this when you don't know the exact repository path. Works across all indexed repositories (local, GitHub, GitLab).",
+                description="Fuzzy search for repositories with typo tolerance. Returns top matches even with partial names or typos. This is the default search - use repo-ctx-find-repo for exact matches. Works across all indexed repositories (local, GitHub, GitLab).",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -85,6 +86,33 @@ async def serve(
                             "description": "Maximum results to return (default: 10)",
                             "default": 10
                         }
+                    },
+                    "required": ["query"]
+                }
+            ),
+            Tool(
+                name="repo-ctx-find-repo",
+                description="Find repositories by exact name match. Returns matching repositories with their IDs and available versions. Use repo-ctx-search for fuzzy/partial matching. Works across all providers (local, GitHub, GitLab).",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "libraryName": {
+                            "type": "string",
+                            "description": "Repository name to search for (exact match)"
+                        }
+                    },
+                    "required": ["libraryName"]
+                }
+            ),
+            # Deprecated aliases for backwards compatibility
+            Tool(
+                name="repo-ctx-fuzzy-search",
+                description="[DEPRECATED: Use repo-ctx-search instead] Fuzzy search for repositories with typo tolerance.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search term"},
+                        "limit": {"type": "integer", "default": 10}
                     },
                     "required": ["query"]
                 }
@@ -140,50 +168,65 @@ async def serve(
                 inputSchema={
                     "type": "object",
                     "properties": {
+                        "repository": {
+                            "type": "string",
+                            "description": "Repository ID in format /group/project or /group/project/version (preferred parameter name)"
+                        },
                         "libraryId": {
                             "type": "string",
-                            "description": "Library ID in format /group/project or /group/project/version"
+                            "description": "[Deprecated: use 'repository'] Library ID in format /group/project"
                         },
                         "topic": {
                             "type": "string",
                             "description": "Optional topic to filter documentation"
                         },
+                        "max_tokens": {
+                            "type": "integer",
+                            "description": "Maximum tokens to return (recommended for LLM context management)"
+                        },
                         "maxTokens": {
                             "type": "integer",
-                            "description": "Maximum tokens to return (recommended for LLM context management, e.g., 8000 for most models, 50000 for long-context models). If specified, page parameter is ignored."
+                            "description": "[Deprecated: use 'max_tokens'] Maximum tokens to return"
                         },
                         "page": {
                             "type": "integer",
-                            "description": "Page number for pagination (default: 1). Ignored if maxTokens is specified.",
+                            "description": "Page number for pagination (default: 1). Ignored if max_tokens is specified.",
                             "default": 1
                         },
-                        "includeMetadata": {
+                        "include_metadata": {
                             "type": "boolean",
                             "description": "Include quality scores, document types, and metadata in response (default: false)",
                             "default": False
+                        },
+                        "includeMetadata": {
+                            "type": "boolean",
+                            "description": "[Deprecated: use 'include_metadata'] Include metadata"
                         },
                         "include": {
                             "type": "array",
                             "items": {"type": "string"},
                             "description": "Additional content to include. Options: 'code' (structure), 'symbols' (detailed info), 'diagrams' (mermaid), 'tests' (include test code), 'examples' (all doc snippets), 'all'. Example: ['code', 'diagrams']"
                         },
-                        "outputMode": {
+                        "output_mode": {
                             "type": "string",
                             "enum": ["summary", "standard", "full"],
-                            "description": "Output detail level. 'summary': titles and descriptions only (~500-2000 tokens). 'standard': balanced content with quality filtering (default). 'full': everything including tests and low-quality docs.",
+                            "description": "Output detail level: 'summary', 'standard' (default), 'full'",
                             "default": "standard"
+                        },
+                        "outputMode": {
+                            "type": "string",
+                            "description": "[Deprecated: use 'output_mode']"
                         },
                         "query": {
                             "type": "string",
-                            "description": "Search query for relevance-based filtering. Documents matching the query are prioritized. Example: 'authentication oauth' to find docs about auth."
+                            "description": "Search query for relevance-based filtering. Documents matching the query are prioritized."
                         },
                         "refresh": {
                             "type": "boolean",
-                            "description": "Force re-analysis of code (ignore cached symbols). Use when class hierarchy is missing edges. (default: false)",
+                            "description": "Force re-analysis of code (ignore cached symbols). (default: false)",
                             "default": False
                         }
-                    },
-                    "required": ["libraryId"]
+                    }
                 }
             ),
             Tool(
@@ -243,9 +286,10 @@ async def serve(
                     }
                 }
             ),
+            # Code Analysis - Symbol Tools (new names)
             Tool(
-                name="repo-ctx-search-symbol",
-                description="Search for symbols by name or pattern across analyzed code. Can search local paths OR indexed repositories. Use fuzzy matching to find functions, classes, methods even with partial names. Useful for code navigation and exploration.",
+                name="repo-ctx-find-symbol",
+                description="Find symbols by name or pattern across analyzed code. Can search local paths OR indexed repositories. Use fuzzy matching to find functions, classes, methods even with partial names. Useful for code navigation and exploration.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -282,8 +326,8 @@ async def serve(
                 }
             ),
             Tool(
-                name="repo-ctx-get-symbol-detail",
-                description="Get detailed information about a specific symbol including its full signature, documentation, metadata, and source location. Can search local paths OR indexed repositories. Use after finding a symbol with search-symbol.",
+                name="repo-ctx-symbol-detail",
+                description="Get detailed information about a specific symbol including its full signature, documentation, metadata, and source location. Can search local paths OR indexed repositories. Use after finding a symbol with find-symbol.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -310,7 +354,7 @@ async def serve(
                 }
             ),
             Tool(
-                name="repo-ctx-get-file-symbols",
+                name="repo-ctx-file-symbols",
                 description="Get all symbols defined in a specific file. Returns symbols organized by type with full details. Useful for understanding file structure.",
                 inputSchema={
                     "type": "object",
@@ -330,6 +374,44 @@ async def serve(
                             "enum": ["text", "json", "yaml"],
                             "default": "text"
                         }
+                    },
+                    "required": ["filePath"]
+                }
+            ),
+            # Deprecated symbol tool aliases
+            Tool(
+                name="repo-ctx-search-symbol",
+                description="[DEPRECATED: Use repo-ctx-find-symbol instead] Search for symbols by name or pattern.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"},
+                        "path": {"type": "string"},
+                        "repoId": {"type": "string"}
+                    },
+                    "required": ["query"]
+                }
+            ),
+            Tool(
+                name="repo-ctx-get-symbol-detail",
+                description="[DEPRECATED: Use repo-ctx-symbol-detail instead] Get symbol details.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "symbolName": {"type": "string", "description": "Symbol name"},
+                        "path": {"type": "string"},
+                        "repoId": {"type": "string"}
+                    },
+                    "required": ["symbolName"]
+                }
+            ),
+            Tool(
+                name="repo-ctx-get-file-symbols",
+                description="[DEPRECATED: Use repo-ctx-file-symbols instead] Get file symbols.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "filePath": {"type": "string", "description": "File path"}
                     },
                     "required": ["filePath"]
                 }
@@ -395,33 +477,24 @@ async def serve(
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+        # Handle deprecated tool names with warnings
+        deprecation_notice = ""
+        if is_deprecated_name(name):
+            canonical = get_canonical_name(name)
+            deprecation_notice = f"⚠️ DEPRECATION WARNING: '{name}' is deprecated. Please use '{canonical}' instead.\n\n"
+            # Map to canonical name for processing
+            name = canonical
+
+        # repo-ctx-search: Fuzzy search (was repo-ctx-fuzzy-search)
         if name == "repo-ctx-search":
-            library_name = arguments["libraryName"]
-            results = await context.search_libraries(library_name)
-
-            output = []
-            output.append("Available Repositories (search results):\n\n")
-
-            for result in results:
-                output.append(f"- Repository ID: {result.library_id}\n")
-                output.append(f"  Name: {result.name}\n")
-                output.append(f"  Description: {result.description}\n")
-                output.append(f"  Versions: {', '.join(result.versions)}\n")
-                output.append("\n")
-
-            if not results:
-                output.append(f"No repositories found matching '{library_name}'.\n")
-                output.append("Make sure the repository has been indexed first using repo-ctx-index.\n")
-
-            return [TextContent(type="text", text="".join(output))]
-
-        elif name == "repo-ctx-fuzzy-search":
             query = arguments["query"]
             limit = arguments.get("limit", 10)
             results = await context.fuzzy_search_libraries(query, limit)
 
             output = []
-            output.append(f"Fuzzy search results for '{query}':\n\n")
+            if deprecation_notice:
+                output.append(deprecation_notice)
+            output.append(f"Search results for '{query}':\n\n")
 
             for i, result in enumerate(results, 1):
                 output.append(f"{i}. {result.library_id}\n")
@@ -436,6 +509,29 @@ async def serve(
                 output.append("Try a different search term or index repositories first using repo-ctx-index or repo-ctx-index-group.\n")
             else:
                 output.append(f"\nTo get documentation, use repo-ctx-docs with one of the Repository IDs above.\n")
+
+            return [TextContent(type="text", text="".join(output))]
+
+        # repo-ctx-find-repo: Exact search (was repo-ctx-search)
+        elif name == "repo-ctx-find-repo":
+            library_name = arguments["libraryName"]
+            results = await context.search_libraries(library_name)
+
+            output = []
+            if deprecation_notice:
+                output.append(deprecation_notice)
+            output.append("Available Repositories (exact match):\n\n")
+
+            for result in results:
+                output.append(f"- Repository ID: {result.library_id}\n")
+                output.append(f"  Name: {result.name}\n")
+                output.append(f"  Description: {result.description}\n")
+                output.append(f"  Versions: {', '.join(result.versions)}\n")
+                output.append("\n")
+
+            if not results:
+                output.append(f"No repositories found matching '{library_name}'.\n")
+                output.append("Try repo-ctx-search for fuzzy matching, or index the repository first using repo-ctx-index.\n")
 
             return [TextContent(type="text", text="".join(output))]
 
@@ -501,13 +597,17 @@ async def serve(
                 return [TextContent(type="text", text=f"Error indexing group {group}: {str(e)}")]
 
         elif name == "repo-ctx-docs":
-            library_id = arguments["libraryId"]
+            # Use parameter helpers for backwards compatibility
+            library_id = get_repository_id(arguments)
+            if not library_id:
+                return [TextContent(type="text", text="Error: 'repository' (or 'libraryId') parameter is required")]
+
             topic = arguments.get("topic")
             page = arguments.get("page", 1)
-            max_tokens = arguments.get("maxTokens")
-            include_metadata = arguments.get("includeMetadata", False)
+            max_tokens = arguments.get("max_tokens") or arguments.get("maxTokens")
+            include_metadata = arguments.get("include_metadata", arguments.get("includeMetadata", False))
             refresh = arguments.get("refresh", False)
-            output_mode_str = arguments.get("outputMode", "standard")
+            output_mode_str = arguments.get("output_mode") or arguments.get("outputMode", "standard")
 
             # Parse output mode
             try:
@@ -631,13 +731,14 @@ async def serve(
             from .analysis import CodeAnalyzer, SymbolType
             import os
 
+            # Use parameter helpers for backwards compatibility
             path = arguments.get("path")
-            repo_id = arguments.get("repoId")
+            repo_id = arguments.get("repository") or arguments.get("repoId")
             force_refresh = arguments.get("refresh", False)
-            language_filter = arguments.get("language")
-            symbol_type_filter = arguments.get("symbolType")
-            include_private = arguments.get("includePrivate", True)
-            output_format = arguments.get("outputFormat", "text")
+            language_filter = get_language(arguments)
+            symbol_type_filter = get_symbol_type(arguments)
+            include_private = arguments.get("include_private", arguments.get("includePrivate", True))
+            output_format = get_output_format(arguments)
 
             try:
                 analyzer = CodeAnalyzer()
@@ -770,17 +871,19 @@ async def serve(
             except Exception as e:
                 return [TextContent(type="text", text=f"Error analyzing code: {str(e)}")]
 
-        elif name == "repo-ctx-search-symbol":
+        # repo-ctx-find-symbol: Search symbols (was repo-ctx-search-symbol)
+        elif name == "repo-ctx-find-symbol":
             from pathlib import Path
             from .analysis import CodeAnalyzer, SymbolType
             import os
 
+            # Use parameter helpers for backwards compatibility
             path = arguments.get("path")
-            repo_id = arguments.get("repoId")
+            repo_id = arguments.get("repository") or arguments.get("repoId")
             query = arguments["query"].lower()
-            symbol_type_filter = arguments.get("symbolType")
-            language_filter = arguments.get("language")
-            output_format = arguments.get("outputFormat", "text")
+            symbol_type_filter = get_symbol_type(arguments)
+            language_filter = get_language(arguments)
+            output_format = get_output_format(arguments)
 
             try:
                 analyzer = CodeAnalyzer()
@@ -891,16 +994,21 @@ async def serve(
             except Exception as e:
                 return [TextContent(type="text", text=f"Error searching symbols: {str(e)}")]
 
-        elif name == "repo-ctx-get-symbol-detail":
+        # repo-ctx-symbol-detail: Get symbol details (was repo-ctx-get-symbol-detail)
+        elif name == "repo-ctx-symbol-detail":
             from pathlib import Path
             from .analysis import CodeAnalyzer
             import os
             import json
 
+            # Use parameter helpers for backwards compatibility
             path = arguments.get("path")
-            repo_id = arguments.get("repoId")
-            symbol_name = arguments["symbolName"]
-            output_format = arguments.get("outputFormat", "text")
+            repo_id = arguments.get("repository") or arguments.get("repoId")
+            symbol_name = arguments.get("symbol_name") or arguments.get("symbolName")
+            output_format = get_output_format(arguments)
+
+            if not symbol_name:
+                return [TextContent(type="text", text="Error: 'symbol_name' (or 'symbolName') parameter is required")]
 
             try:
                 analyzer = CodeAnalyzer()
@@ -1031,14 +1139,19 @@ async def serve(
             except Exception as e:
                 return [TextContent(type="text", text=f"Error getting symbol details: {str(e)}")]
 
-        elif name == "repo-ctx-get-file-symbols":
+        # repo-ctx-file-symbols: Get file symbols (was repo-ctx-get-file-symbols)
+        elif name == "repo-ctx-file-symbols":
             from pathlib import Path
             from .analysis import CodeAnalyzer
             import json
 
-            file_path = arguments["filePath"]
-            group_by_type = arguments.get("groupByType", True)
-            output_format = arguments.get("outputFormat", "text")
+            # Use parameter helpers for backwards compatibility
+            file_path = arguments.get("file_path") or arguments.get("filePath")
+            group_by_type = arguments.get("group_by_type", arguments.get("groupByType", True))
+            output_format = get_output_format(arguments)
+
+            if not file_path:
+                return [TextContent(type="text", text="Error: 'file_path' (or 'filePath') parameter is required")]
 
             try:
                 path_obj = Path(file_path)
@@ -1153,11 +1266,12 @@ async def serve(
             from .analysis import CodeAnalyzer, DependencyGraph, GraphType
             import os
 
+            # Use parameter helpers for backwards compatibility
             path = arguments.get("path")
-            repo_id = arguments.get("repoId")
-            graph_type_str = arguments.get("graphType", "class")
+            repo_id = arguments.get("repository") or arguments.get("repoId")
+            graph_type_str = arguments.get("graph_type") or arguments.get("graphType") or "class"
             max_depth = arguments.get("depth")
-            output_format = arguments.get("outputFormat", "json")
+            output_format = get_output_format(arguments, default="json")
 
             try:
                 analyzer = CodeAnalyzer()
@@ -1272,12 +1386,13 @@ async def serve(
         elif name == "repo-ctx-llmstxt":
             from .llmstxt import LlmsTxtGenerator
 
-            library_id = arguments.get("libraryId")
-            include_api = arguments.get("includeApi", True)
-            include_quickstart = arguments.get("includeQuickstart", True)
+            # Use parameter helpers for backwards compatibility
+            library_id = get_repository_id(arguments)
+            include_api = arguments.get("include_api", arguments.get("includeApi", True))
+            include_quickstart = arguments.get("include_quickstart", arguments.get("includeQuickstart", True))
 
             if not library_id:
-                return [TextContent(type="text", text="Error: libraryId is required")]
+                return [TextContent(type="text", text="Error: 'repository' (or 'libraryId') parameter is required")]
 
             try:
                 # Parse library ID

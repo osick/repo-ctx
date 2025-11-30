@@ -6,27 +6,46 @@ Complete reference for all MCP tools provided by the repo-ctx server.
 
 ## Overview
 
-repo-ctx provides **10 MCP tools** for repository documentation indexing, retrieval, and code analysis:
+repo-ctx provides **12 MCP tools** for repository documentation indexing, retrieval, and code analysis.
 
-### Repository Management & Documentation (6 tools)
+### Repository Management (7 tools)
 
-1. **repo-ctx-search** - Search for indexed repositories
-2. **repo-ctx-fuzzy-search** - Fuzzy/typo-tolerant search
-3. **repo-ctx-index** - Index a single repository
-4. **repo-ctx-index-group** - Index all repositories in a group/organization
-5. **repo-ctx-list** - List all indexed repositories
-6. **repo-ctx-docs** - Retrieve documentation content
+| Tool | Description |
+|------|-------------|
+| `repo-ctx-index` | Index a single repository |
+| `repo-ctx-index-group` | Index all repositories in a group/organization |
+| `repo-ctx-list` | List all indexed repositories |
+| `repo-ctx-search` | Fuzzy/typo-tolerant search |
+| `repo-ctx-find-repo` | Search by exact repository name |
+| `repo-ctx-docs` | Retrieve documentation content |
+| `repo-ctx-llmstxt` | Generate llms.txt format output |
 
-### Code Analysis (4 tools)
+### Code Analysis (5 tools)
 
-7. **repo-ctx-analyze** - Analyze code structure and extract symbols
-8. **repo-ctx-search-symbol** - Search for symbols by name or pattern
-9. **repo-ctx-get-symbol-detail** - Get detailed symbol information
-10. **repo-ctx-get-file-symbols** - List all symbols in a specific file
+| Tool | Description |
+|------|-------------|
+| `repo-ctx-analyze` | Analyze code structure and extract symbols |
+| `repo-ctx-find-symbol` | Search for symbols by name or pattern |
+| `repo-ctx-symbol-detail` | Get detailed symbol information |
+| `repo-ctx-file-symbols` | List all symbols in a specific file |
+| `repo-ctx-dependency-graph` | Generate dependency graphs |
 
-**Note:** All tools support **GitLab, GitHub, and local Git repositories** with auto-detection or explicit provider selection.
+**Provider support:** All tools support **GitLab, GitHub, and local Git repositories** with auto-detection or explicit provider selection.
 
-**Supported languages for code analysis:** Python, JavaScript, TypeScript, Java, Kotlin
+**Supported languages:** Python, JavaScript, TypeScript, Java, Kotlin
+
+### Tool Naming Compatibility
+
+Both new and legacy tool names are supported for backwards compatibility:
+
+| Current Name | Legacy Name (still works) |
+|--------------|--------------------------|
+| `repo-ctx-search` | `repo-ctx-fuzzy-search` |
+| `repo-ctx-find-symbol` | `repo-ctx-search-symbol` |
+| `repo-ctx-symbol-detail` | `repo-ctx-get-symbol-detail` |
+| `repo-ctx-file-symbols` | `repo-ctx-get-file-symbols` |
+
+Legacy names will emit deprecation warnings but continue to function.
 
 ---
 

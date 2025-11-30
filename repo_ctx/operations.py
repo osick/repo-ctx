@@ -232,14 +232,22 @@ def get_clone_url(provider_type: str, group: str, project: str, config=None) -> 
         raise ValueError(f"Unsupported provider for clone: {provider_type}")
 
 
-def parse_include_options(include_str: Optional[str] = None, include_list: Optional[List[str]] = None) -> dict:
+def parse_include_options(
+    include_input: Optional[str | List[str]] = None,
+    include_list: Optional[List[str]] = None,
+    *,
+    include_str: Optional[str] = None  # Backwards compatibility alias
+) -> dict:
     """Parse include options into a dictionary of boolean flags.
 
-    Accepts either a comma-separated string or a list of options.
+    Accepts either a comma-separated string, a list of options, or both.
+    This provides compatibility between CLI (string) and MCP (array) formats.
 
     Args:
-        include_str: Comma-separated string like "code,diagrams,tests"
-        include_list: List of option strings like ["code", "diagrams"]
+        include_input: Either a comma-separated string like "code,diagrams,tests"
+                      or a list of option strings like ["code", "diagrams"]
+        include_list: (Deprecated) List of option strings, use include_input instead
+        include_str: (Deprecated) Alias for include_input when passing a string
 
     Returns:
         Dictionary with boolean flags:
@@ -259,9 +267,20 @@ def parse_include_options(include_str: Optional[str] = None, include_list: Optio
 
     # Build options set from either input
     options = set()
-    if include_str:
-        options = {opt.strip().lower() for opt in include_str.split(',')}
-    elif include_list:
+
+    # Handle backwards compatibility alias
+    if include_str is not None and include_input is None:
+        include_input = include_str
+
+    # Handle first parameter (can be string or list)
+    if include_input:
+        if isinstance(include_input, str):
+            options = {opt.strip().lower() for opt in include_input.split(',')}
+        elif isinstance(include_input, list):
+            options = {opt.lower() for opt in include_input}
+
+    # Handle legacy include_list parameter
+    if include_list:
         options = {opt.lower() for opt in include_list}
 
     if not options:

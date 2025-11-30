@@ -48,3 +48,5 @@ notify.md
 mcp.json
 .mcp.json
 .repo-ctx/
+tests/test_tool_naming.py
+.VSCodeCounter/
