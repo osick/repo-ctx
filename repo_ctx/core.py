@@ -11,6 +11,7 @@ from .providers import (
     ProviderProject,
     ProviderNotFoundError
 )
+from .progress import ProgressCallback, ProgressReporter, ProgressPhase
 
 
 class RepositoryContext:
@@ -456,7 +457,8 @@ class RepositoryContext:
         self,
         group: str,
         project: str,
-        provider_type: Optional[str] = None
+        provider_type: Optional[str] = None,
+        progress: Optional[ProgressCallback] = None
     ):
         """
         Index a repository from any provider.
@@ -465,15 +467,21 @@ class RepositoryContext:
             group: Group/organization path (or full path for local repos)
             project: Project/repository name (or empty for local repos)
             provider_type: Provider type (gitlab, github, local) or None for auto-detect
+            progress: Optional progress callback for reporting indexing progress
 
         Raises:
             ValueError: Provider not configured
             ProviderNotFoundError: Repository not found
         """
+        # Create progress reporter for this operation
+        repo_name = f"{group}/{project}" if project else group
+        reporter = ProgressReporter(progress, "index_repo")
         # Auto-detect provider if not specified
         if provider_type is None:
             path = f"{group}/{project}" if project else group
             provider_type = ProviderDetector.detect(path, default=self.default_provider)
+
+        await reporter.start(f"Indexing {repo_name}", provider=provider_type)
 
         # For local provider, group contains the full path
         if provider_type == "local":
@@ -485,6 +493,7 @@ class RepositoryContext:
             project_path = f"{group}/{project}"
 
         # Get project via provider interface
+        await reporter.update(message="Getting project metadata", detail=project_path)
         proj = await provider.get_project(project_path)
 
         # Get default branch
@@ -508,31 +517,42 @@ class RepositoryContext:
         )
         db_library_id = await self.storage.save_library(library)
 
+        # Get tags to calculate total work
+        tags = await provider.get_tags(proj, limit=5)
+        total_versions = 1 + len(tags)  # default branch + tags
+        reporter.total = total_versions
+
         # Index default branch
+        await reporter.update(current=1, message="Indexing default branch", detail=default_branch)
         await self._index_version(
             provider,
             proj,
             db_library_id,
             default_branch,
-            config
+            config,
+            progress=progress
         )
 
         # Index tags
-        tags = await provider.get_tags(proj, limit=5)
-        for tag in tags:
+        for i, tag in enumerate(tags, start=2):
+            await reporter.update(current=i, message="Indexing tag", detail=tag)
             await self._index_version(
                 provider,
                 proj,
                 db_library_id,
                 tag,
-                config
+                config,
+                progress=progress
             )
+
+        await reporter.complete(f"Indexed {total_versions} version(s)", files_indexed=total_versions)
 
     async def index_group(
         self,
         group_path: str,
         include_subgroups: bool = True,
-        provider_type: Optional[str] = None
+        provider_type: Optional[str] = None,
+        progress: Optional[ProgressCallback] = None
     ) -> dict:
         """
         Index all projects in a group/organization.
@@ -541,6 +561,7 @@ class RepositoryContext:
             group_path: Group path
             include_subgroups: Include nested subgroups (GitLab only)
             provider_type: Provider type or None for default
+            progress: Optional progress callback for reporting indexing progress
 
         Returns:
             Summary of indexing results
@@ -548,10 +569,17 @@ class RepositoryContext:
         provider_type = provider_type or self.default_provider
         provider = self.get_provider(provider_type)
 
+        # Create progress reporter for group indexing
+        reporter = ProgressReporter(progress, "index_group")
+        await reporter.start(f"Indexing group {group_path}", provider=provider_type)
+
+        await reporter.update(message="Listing projects", detail=group_path)
         projects = await provider.list_projects_in_group(
             group_path,
             include_subgroups
         )
+
+        reporter.total = len(projects)
 
         results = {
             "total": len(projects),
@@ -559,7 +587,7 @@ class RepositoryContext:
             "failed": []
         }
 
-        for proj in projects:
+        for i, proj in enumerate(projects, start=1):
             # Parse path to extract group and project
             parts = proj.path.split("/")
             if len(parts) < 2:
@@ -568,11 +596,14 @@ class RepositoryContext:
             project_name = parts[-1]
             group_name = "/".join(parts[:-1])
 
+            await reporter.update(current=i, message="Indexing repository", detail=proj.path)
+
             try:
                 await self.index_repository(
                     group_name,
                     project_name,
-                    provider_type
+                    provider_type,
+                    progress=None  # Don't pass nested progress to avoid noise
                 )
                 results["indexed"].append(proj.path)
             except Exception as e:
@@ -580,6 +611,12 @@ class RepositoryContext:
                     "path": proj.path,
                     "error": str(e)
                 })
+
+        await reporter.complete(
+            f"Indexed {len(results['indexed'])} of {results['total']} repositories",
+            indexed=len(results['indexed']),
+            failed=len(results['failed'])
+        )
 
         return results
 
@@ -589,7 +626,8 @@ class RepositoryContext:
         project: ProviderProject,
         library_id: int,
         ref: str,
-        config: Optional[dict]
+        config: Optional[dict],
+        progress: Optional[ProgressCallback] = None
     ):
         """
         Index a specific version/branch/tag.
@@ -600,7 +638,11 @@ class RepositoryContext:
             library_id: Database library ID
             ref: Branch, tag, or commit SHA
             config: Optional repo-ctx configuration
+            progress: Optional progress callback for file-level progress
         """
+        # Create progress reporter for file processing within this version
+        reporter = ProgressReporter(progress, "index_files")
+
         # For commit SHA, we need to get it from the ref
         # For now, use ref as commit SHA (works for GitLab)
         # TODO: Get actual commit SHA for the ref
@@ -617,13 +659,19 @@ class RepositoryContext:
         # Get file tree
         file_paths = await provider.get_file_tree(project, ref, recursive=True)
 
-        # Filter and process files
-        for path in file_paths:
-            if not self.parser.should_include_file(path, config):
-                continue
+        # Filter to get indexable files
+        indexable_files = [p for p in file_paths if self.parser.should_include_file(p, config)]
+        reporter.total = len(indexable_files)
 
+        if indexable_files:
+            await reporter.start(f"Processing {len(indexable_files)} files", version=ref)
+
+        # Filter and process files
+        files_indexed = 0
+        for i, path in enumerate(indexable_files, start=1):
             # Read file content
             try:
+                await reporter.update(current=i, message="Reading file", detail=path)
                 file = await provider.read_file(project, path, ref)
                 parsed_content = self.parser.parse_markdown(file.content)
                 tokens = self.parser.count_tokens(parsed_content)
@@ -636,10 +684,14 @@ class RepositoryContext:
                     tokens=tokens
                 )
                 await self.storage.save_document(doc)
+                files_indexed += 1
             except Exception as e:
                 # Skip files that can't be read
                 print(f"Warning: Could not read {path}: {e}")
                 continue
+
+        if indexable_files:
+            await reporter.complete(f"Indexed {files_indexed} files", version=ref)
 
 
 # Backward compatibility alias

@@ -14,6 +14,7 @@ from rich.markup import escape as rich_escape
 from rich import box
 
 from ..models import OutputMode
+from ..progress import PrintProgressCallback
 from ..operations import (
     parse_repo_id,
     is_local_path,
@@ -99,7 +100,10 @@ async def repo_index(args):
             group = "/".join(parts[:-1])
             provider_type = None if provider == "auto" else provider
 
-        await context.index_repository(group, project, provider_type=provider_type)
+        # Use progress callback for text output (not JSON)
+        progress = None if args.output == "json" else PrintProgressCallback()
+
+        await context.index_repository(group, project, provider_type=provider_type, progress=progress)
 
         if args.output == "json":
             print(json.dumps({"status": "success", "repository": path}))
@@ -132,18 +136,28 @@ async def repo_index_group(args):
         # Determine provider type
         provider_type = None if provider == "auto" else provider
 
+        # Use progress callback for text output (not JSON)
+        progress = None if args.output == "json" else PrintProgressCallback()
+
         # Index the group
-        count = await context.index_group(group, include_subgroups=include_subgroups, provider_type=provider_type)
+        result = await context.index_group(group, include_subgroups=include_subgroups, provider_type=provider_type, progress=progress)
 
         if args.output == "json":
             print(json.dumps({
                 "status": "success",
                 "group": group,
-                "repositories_indexed": count,
-                "include_subgroups": include_subgroups
+                "repositories_indexed": len(result.get("indexed", [])),
+                "repositories_failed": len(result.get("failed", [])),
+                "include_subgroups": include_subgroups,
+                "indexed": result.get("indexed", []),
+                "failed": result.get("failed", [])
             }))
         else:
-            console.print(f"[green]Successfully indexed {count} repositories from '{group}'[/green]")
+            indexed_count = len(result.get("indexed", []))
+            failed_count = len(result.get("failed", []))
+            console.print(f"[green]Successfully indexed {indexed_count} repositories from '{group}'[/green]")
+            if failed_count > 0:
+                console.print(f"[yellow]Failed to index {failed_count} repositories[/yellow]")
             if include_subgroups:
                 console.print("[dim]Including subgroups[/dim]")
 
