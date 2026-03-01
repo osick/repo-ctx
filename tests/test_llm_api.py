@@ -9,6 +9,7 @@ These tests verify:
 """
 
 import pytest
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 
@@ -404,18 +405,23 @@ class TestLLMFallbackBehavior:
         return TestClient(app)
 
     def test_summarize_fallback_extracts_docstring(self, client):
-        """Test that fallback extracts from docstring."""
-        response = client.post(
-            "/v1/llm/summarize",
-            json={
-                "code": '''
+        """Test that fallback extracts from docstring.
+
+        Patches LITELLM_AVAILABLE to False so the heuristic fallback runs
+        deterministically without requiring a real API key.
+        """
+        with patch("repo_ctx.services.llm.LITELLM_AVAILABLE", False):
+            response = client.post(
+                "/v1/llm/summarize",
+                json={
+                    "code": '''
 def calculate(x, y):
     """Calculate the sum of two numbers."""
     return x + y
 ''',
-                "language": "python",
-            },
-        )
+                    "language": "python",
+                },
+            )
 
         assert response.status_code == 200
         data = response.json()
@@ -423,19 +429,24 @@ def calculate(x, y):
         assert len(data["summary"]) > 0
 
     def test_classify_fallback_detects_patterns(self, client):
-        """Test that fallback detects code patterns."""
-        response = client.post(
-            "/v1/llm/classify",
-            json={
-                "code": """
+        """Test that fallback detects code patterns.
+
+        Patches LITELLM_AVAILABLE to False so the heuristic fallback runs
+        deterministically without requiring a real API key.
+        """
+        with patch("repo_ctx.services.llm.LITELLM_AVAILABLE", False):
+            response = client.post(
+                "/v1/llm/classify",
+                json={
+                    "code": """
 class UserController:
     @app.route('/users')
     def get_users(self):
         pass
 """,
-                "language": "python",
-            },
-        )
+                    "language": "python",
+                },
+            )
 
         assert response.status_code == 200
         data = response.json()

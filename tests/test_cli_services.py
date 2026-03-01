@@ -83,14 +83,20 @@ class TestCLIContextInit:
 
     @pytest.mark.asyncio
     async def test_init_services_mode(self, mock_config, mock_legacy_context):
-        """Test init in services mode initializes both."""
+        """Test init in services mode initializes the client."""
         from repo_ctx.cli.context import CLIContext
+        from unittest.mock import AsyncMock, MagicMock, patch
 
-        ctx = CLIContext(mock_config, legacy_mode=False, legacy_context=mock_legacy_context)
-        await ctx.init()
+        with patch('repo_ctx.cli.context.RepoCtxClient') as MockClient:
+            mock_client = AsyncMock()
+            mock_client.connect = AsyncMock()
+            MockClient.return_value = mock_client
 
-        mock_legacy_context.init.assert_called_once()
-        assert ctx.services is not None
+            ctx = CLIContext(mock_config, legacy_mode=False, legacy_context=mock_legacy_context)
+            await ctx.init()
+
+            mock_client.connect.assert_called_once()
+            assert ctx.client is not None
 
     @pytest.mark.asyncio
     async def test_init_legacy_mode(self, mock_config, mock_legacy_context):
@@ -108,18 +114,27 @@ class TestCLIContextIndexing:
 
     @pytest.mark.asyncio
     async def test_index_repository_services_mode(self, mock_config, mock_legacy_context):
-        """Test index_repository uses service layer in services mode."""
+        """Test index_repository uses the client in services mode."""
         from repo_ctx.cli.context import CLIContext
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from repo_ctx.client.models import IndexResult
 
-        ctx = CLIContext(mock_config, legacy_mode=False, legacy_context=mock_legacy_context)
-        await ctx.init()
+        with patch('repo_ctx.cli.context.RepoCtxClient') as MockClient:
+            mock_client = AsyncMock()
+            mock_client.connect = AsyncMock()
+            mock_result = MagicMock(spec=IndexResult)
+            mock_result.status = "success"
+            mock_result.repository = "owner/repo"
+            mock_result.error = None
+            mock_client.index_repository = AsyncMock(return_value=mock_result)
+            MockClient.return_value = mock_client
 
-        # Mock the indexing service
-        ctx._indexing.index_repository = AsyncMock(return_value={"status": "completed"})
+            ctx = CLIContext(mock_config, legacy_mode=False, legacy_context=mock_legacy_context)
+            await ctx.init()
 
-        result = await ctx.index_repository("owner", "repo", provider_type="github")
+            result = await ctx.index_repository("owner", "repo", provider_type="github")
 
-        ctx._indexing.index_repository.assert_called_once()
+            mock_client.index_repository.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_index_repository_legacy_mode(self, mock_config, mock_legacy_context):
@@ -139,31 +154,45 @@ class TestCLIContextSearch:
 
     @pytest.mark.asyncio
     async def test_fuzzy_search_services_mode(self, mock_config, mock_legacy_context):
-        """Test fuzzy_search uses service layer."""
+        """Test fuzzy_search uses the client in services mode."""
         from repo_ctx.cli.context import CLIContext
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from repo_ctx.client.models import SearchResult
 
-        ctx = CLIContext(mock_config, legacy_mode=False, legacy_context=mock_legacy_context)
-        await ctx.init()
+        with patch('repo_ctx.cli.context.RepoCtxClient') as MockClient:
+            mock_client = AsyncMock()
+            mock_client.connect = AsyncMock()
+            mock_search_result = MagicMock(spec=SearchResult)
+            mock_search_result.name = "test-repo"
+            mock_search_result.score = 0.9
+            mock_client.search_libraries = AsyncMock(return_value=[mock_search_result])
+            MockClient.return_value = mock_client
 
-        # Services mode still uses legacy for search (not yet migrated)
-        await ctx.fuzzy_search_libraries("test", limit=10)
+            ctx = CLIContext(mock_config, legacy_mode=False, legacy_context=mock_legacy_context)
+            await ctx.init()
 
-        mock_legacy_context.fuzzy_search_libraries.assert_called_once()
+            results = await ctx.fuzzy_search_libraries("test", limit=10)
+
+            mock_client.search_libraries.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_list_all_libraries_services_mode(self, mock_config, mock_legacy_context):
-        """Test list_all_libraries uses repository service in services mode."""
+        """Test list_all_libraries uses the client in services mode."""
         from repo_ctx.cli.context import CLIContext
+        from unittest.mock import AsyncMock, MagicMock, patch
 
-        ctx = CLIContext(mock_config, legacy_mode=False, legacy_context=mock_legacy_context)
-        await ctx.init()
+        with patch('repo_ctx.cli.context.RepoCtxClient') as MockClient:
+            mock_client = AsyncMock()
+            mock_client.connect = AsyncMock()
+            mock_client.list_libraries = AsyncMock(return_value=[])
+            MockClient.return_value = mock_client
 
-        # Mock the repository service
-        ctx._repository.list_repositories = AsyncMock(return_value=[])
+            ctx = CLIContext(mock_config, legacy_mode=False, legacy_context=mock_legacy_context)
+            await ctx.init()
 
-        await ctx.list_all_libraries()
+            await ctx.list_all_libraries()
 
-        ctx._repository.list_repositories.assert_called_once()
+            mock_client.list_libraries.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_list_all_libraries_legacy_mode(self, mock_config, mock_legacy_context):

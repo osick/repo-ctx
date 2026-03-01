@@ -210,20 +210,32 @@ class TestGenerateEmbedding:
 
     @pytest.mark.asyncio
     async def test_generate_embedding_caching(self):
-        """Test embedding caching behavior."""
+        """Test embedding caching behavior.
+
+        Mocks litellm.aembedding so the success path runs and caching is exercised,
+        regardless of whether a real API key is configured.
+        """
         content_storage = MagicMock(spec=ContentStorage)
         context = ServiceContext(content_storage=content_storage)
         service = EmbeddingService(context, cache_enabled=True)
 
         text = "Cache test content"
+        fake_embedding = [0.1] * 1536
 
-        # First call
-        embedding1 = await service.generate_embedding(text)
-        assert len(service._cache) == 1
+        with patch("litellm.aembedding", new_callable=AsyncMock) as mock_aembedding:
+            mock_response = MagicMock()
+            mock_response.data = [{"embedding": fake_embedding}]
+            mock_aembedding.return_value = mock_response
 
-        # Second call should use cache
-        embedding2 = await service.generate_embedding(text)
-        assert embedding1 == embedding2
+            # First call
+            embedding1 = await service.generate_embedding(text)
+            assert len(service._cache) == 1
+
+            # Second call should use cache
+            embedding2 = await service.generate_embedding(text)
+            assert embedding1 == embedding2
+            # litellm should only have been called once (second call uses cache)
+            assert mock_aembedding.call_count == 1
 
     @pytest.mark.asyncio
     async def test_generate_embedding_no_cache(self):

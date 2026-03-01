@@ -105,14 +105,19 @@ class TestCodeSummarization:
 
     @pytest.mark.asyncio
     async def test_summarize_code_returns_summary(self, service):
-        """Test that summarize_code returns a CodeSummary."""
+        """Test that summarize_code returns a CodeSummary.
+
+        Patches LITELLM_AVAILABLE to False so the heuristic fallback runs
+        deterministically without requiring a real API key.
+        """
         code = """
 def calculate_average(numbers):
     if not numbers:
         return 0
     return sum(numbers) / len(numbers)
 """
-        result = await service.summarize_code(code, language="python")
+        with patch("repo_ctx.services.llm.LITELLM_AVAILABLE", False):
+            result = await service.summarize_code(code, language="python")
 
         assert isinstance(result, CodeSummary)
         assert result.summary is not None
@@ -175,14 +180,19 @@ class TestCodeExplanation:
 
     @pytest.mark.asyncio
     async def test_explain_code_basic(self, service):
-        """Test basic code explanation."""
+        """Test basic code explanation.
+
+        Patches LITELLM_AVAILABLE to False so the heuristic fallback runs
+        deterministically without requiring a real API key.
+        """
         code = """
 def fibonacci(n):
     if n <= 1:
         return n
     return fibonacci(n-1) + fibonacci(n-2)
 """
-        result = await service.explain_code(code, language="python")
+        with patch("repo_ctx.services.llm.LITELLM_AVAILABLE", False):
+            result = await service.explain_code(code, language="python")
 
         assert isinstance(result, CodeExplanation)
         assert result.explanation is not None
@@ -255,14 +265,19 @@ class UserRepository:
 
     @pytest.mark.asyncio
     async def test_classify_code_returns_categories(self, service):
-        """Test that classification returns multiple categories."""
+        """Test that classification returns multiple categories.
+
+        Patches LITELLM_AVAILABLE to False so the heuristic fallback runs
+        deterministically without requiring a real API key.
+        """
         code = """
 def validate_email(email):
     import re
     pattern = r'^[\\w\\.-]+@[\\w\\.-]+\\.\\w+$'
     return bool(re.match(pattern, email))
 """
-        result = await service.classify_code(code, language="python")
+        with patch("repo_ctx.services.llm.LITELLM_AVAILABLE", False):
+            result = await service.classify_code(code, language="python")
 
         assert isinstance(result.categories, list)
         assert len(result.categories) > 0
@@ -497,13 +512,18 @@ class TestLLMServiceFallback:
 
     @pytest.mark.asyncio
     async def test_fallback_summarization(self, service):
-        """Test fallback summarization without API."""
+        """Test fallback summarization without API.
+
+        Patches LITELLM_AVAILABLE to False so the heuristic fallback runs
+        deterministically without requiring a real API key.
+        """
         code = """
 def calculate_average(numbers):
     '''Calculate the average of a list of numbers.'''
     return sum(numbers) / len(numbers)
 """
-        result = await service.summarize_code(code, "python")
+        with patch("repo_ctx.services.llm.LITELLM_AVAILABLE", False):
+            result = await service.summarize_code(code, "python")
 
         # Fallback should extract from docstring
         assert isinstance(result, CodeSummary)
@@ -511,13 +531,18 @@ def calculate_average(numbers):
 
     @pytest.mark.asyncio
     async def test_fallback_classification(self, service):
-        """Test fallback classification using heuristics."""
+        """Test fallback classification using heuristics.
+
+        Patches LITELLM_AVAILABLE to False so the heuristic fallback runs
+        deterministically without requiring a real API key.
+        """
         code = """
 class UserController:
     def get(self, request):
         return Response(data)
 """
-        result = await service.classify_code(code, "python")
+        with patch("repo_ctx.services.llm.LITELLM_AVAILABLE", False):
+            result = await service.classify_code(code, "python")
 
         assert isinstance(result, CodeClassification)
         assert result.primary_category != "unknown"

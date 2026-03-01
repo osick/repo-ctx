@@ -33,7 +33,7 @@ class TestClass:
             test_file = f.name
 
         try:
-            analyzer = CodeAnalyzer()
+            analyzer = CodeAnalyzer(use_treesitter=True)
             path_obj = Path(test_file)
 
             # Simulate handler logic
@@ -83,7 +83,7 @@ def createPost():
             test_file = f.name
 
         try:
-            analyzer = CodeAnalyzer()
+            analyzer = CodeAnalyzer(use_treesitter=True)
 
             # Read and analyze
             files = {}
@@ -124,7 +124,7 @@ def calculate_sum(a, b):
             test_file = f.name
 
         try:
-            analyzer = CodeAnalyzer()
+            analyzer = CodeAnalyzer(use_treesitter=True)
 
             # Read and analyze
             files = {}
@@ -173,13 +173,13 @@ def function2():
             test_file = f.name
 
         try:
-            analyzer = CodeAnalyzer()
+            analyzer = CodeAnalyzer(use_treesitter=True)
 
             # Read and analyze
             with open(test_file, 'r', encoding='utf-8') as f:
                 code = f.read()
 
-            symbols = analyzer.analyze_file(code, test_file)
+            symbols, _deps = analyzer.analyze_file(code, test_file)
 
             # Group by type
             by_type = {}
@@ -217,7 +217,7 @@ def function2():
                 f.write("function jsFunc() {}")
 
             # Analyze directory
-            analyzer = CodeAnalyzer()
+            analyzer = CodeAnalyzer(use_treesitter=True)
             files = {}
 
             for root, _, filenames in os.walk(tmpdir):
@@ -265,7 +265,7 @@ class TestMCPToolErrorHandling:
             test_file = f.name
 
         try:
-            analyzer = CodeAnalyzer()
+            analyzer = CodeAnalyzer(use_treesitter=True)
             language = analyzer.detect_language(test_file)
 
             assert language is None
@@ -286,7 +286,7 @@ class TestMCPToolErrorHandling:
             with open(txt_file, 'w') as f:
                 f.write("Not a code file")
 
-            analyzer = CodeAnalyzer()
+            analyzer = CodeAnalyzer(use_treesitter=True)
             files = {}
 
             for root, _, filenames in os.walk(tmpdir):
@@ -320,7 +320,7 @@ class TestMCPToolFiltering:
             with open(js_file, 'w') as f:
                 f.write("function jsFunc() {}")
 
-            analyzer = CodeAnalyzer()
+            analyzer = CodeAnalyzer(use_treesitter=True)
             files = {}
 
             for root, _, filenames in os.walk(tmpdir):
@@ -361,12 +361,12 @@ def _private_func():
             test_file = f.name
 
         try:
-            analyzer = CodeAnalyzer()
+            analyzer = CodeAnalyzer(use_treesitter=True)
 
             with open(test_file, 'r', encoding='utf-8') as f:
                 code = f.read()
 
-            symbols = analyzer.analyze_file(code, test_file)
+            symbols, _deps = analyzer.analyze_file(code, test_file)
 
             # Filter public vs private
             public = analyzer.filter_symbols_by_visibility(symbols, "public")
@@ -404,11 +404,11 @@ class Calculator:
         from repo_ctx.analysis import CodeAnalyzer
         import json
 
-        analyzer = CodeAnalyzer()
+        analyzer = CodeAnalyzer(use_treesitter=True)
         with open(sample_python_file, 'r') as f:
             code = f.read()
 
-        symbols = analyzer.analyze_file(code, str(sample_python_file))
+        symbols, _deps = analyzer.analyze_file(code, str(sample_python_file))
         stats = analyzer.get_statistics(symbols)
 
         # Build output similar to MCP tool
@@ -444,11 +444,11 @@ class Calculator:
         from repo_ctx.analysis import CodeAnalyzer
         import json
 
-        analyzer = CodeAnalyzer()
+        analyzer = CodeAnalyzer(use_treesitter=True)
         with open(sample_python_file, 'r') as f:
             code = f.read()
 
-        symbols = analyzer.analyze_file(code, str(sample_python_file))
+        symbols, _deps = analyzer.analyze_file(code, str(sample_python_file))
         symbol = symbols[0]  # Calculator class
 
         output_data = {
@@ -478,13 +478,13 @@ class Calculator:
         from repo_ctx.analysis import CodeAnalyzer
         import json
 
-        analyzer = CodeAnalyzer()
+        analyzer = CodeAnalyzer(use_treesitter=True)
         language = analyzer.detect_language(str(sample_python_file))
 
         with open(sample_python_file, 'r') as f:
             code = f.read()
 
-        symbols = analyzer.analyze_file(code, str(sample_python_file))
+        symbols, _deps = analyzer.analyze_file(code, str(sample_python_file))
 
         output_data = {
             "file": str(sample_python_file),
@@ -527,11 +527,11 @@ class Calculator:
         from repo_ctx.analysis import CodeAnalyzer
         import yaml
 
-        analyzer = CodeAnalyzer()
+        analyzer = CodeAnalyzer(use_treesitter=True)
         with open(sample_python_file, 'r') as f:
             code = f.read()
 
-        symbols = analyzer.analyze_file(code, str(sample_python_file))
+        symbols, _deps = analyzer.analyze_file(code, str(sample_python_file))
 
         output_data = {
             "file": str(sample_python_file),
@@ -560,11 +560,11 @@ class UserService {
         kt_file = tmp_path / "service.kt"
         kt_file.write_text(kotlin_code)
 
-        analyzer = CodeAnalyzer()
+        analyzer = CodeAnalyzer(use_treesitter=True)
         language = analyzer.detect_language(str(kt_file))
         assert language == "kotlin"
 
-        symbols = analyzer.analyze_file(kotlin_code, str(kt_file))
+        symbols, _deps = analyzer.analyze_file(kotlin_code, str(kt_file))
         assert len(symbols) >= 2  # class + method
 
         symbol_names = {s.name for s in symbols}

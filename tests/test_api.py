@@ -347,10 +347,11 @@ class TestRepositoriesEndpointsBehavior:
 
     @pytest.fixture
     def client(self):
-        """Create test client."""
+        """Create test client with lifespan to ensure DB is initialized."""
         from repo_ctx.api import app
 
-        return TestClient(app)
+        with TestClient(app) as client:
+            yield client
 
     def test_list_repositories_returns_empty(self, client):
         """GET /v1/repositories returns empty list when no repos indexed."""
@@ -384,10 +385,11 @@ class TestDocsEndpointsBehavior:
 
     @pytest.fixture
     def client(self):
-        """Create test client."""
+        """Create test client with lifespan to ensure DB is initialized."""
         from repo_ctx.api import app
 
-        return TestClient(app)
+        with TestClient(app) as client:
+            yield client
 
     def test_get_docs_not_found(self, client):
         """GET /v1/docs/{group}/{project} returns 404 for missing repo."""
