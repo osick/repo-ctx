@@ -181,11 +181,25 @@ jobs:
         script: |
           const version = process.env.NEW_VERSION;
 
-          // Get commits in this release
+          // Get all tags to find previous version
+          const tags = await github.rest.repos.listTags({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            per_page: 10
+          });
+
+          // Find previous tag (skip current version)
+          const prevTag = tags.data.find(t => t.name !== `v${version}`);
+          if (!prevTag) {
+            console.log('No previous tag found, skipping issue labeling');
+            return;
+          }
+
+          // Get commits between previous tag and current
           const commits = await github.rest.repos.compareCommits({
             owner: context.repo.owner,
             repo: context.repo.repo,
-            base: 'HEAD~10',
+            base: prevTag.commit.sha,
             head: context.sha
           });
 
