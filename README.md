@@ -1,62 +1,60 @@
 # repo-ctx
 
-A Git repository documentation indexer and code analyzer for AI assistants and developers.
+[![PyPI](https://img.shields.io/pypi/v/repo-ctx)](https://pypi.org/project/repo-ctx/)
+[![Python](https://img.shields.io/pypi/pyversions/repo-ctx)](https://pypi.org/project/repo-ctx/)
+[![License](https://img.shields.io/github/license/osick/repo-ctx)](LICENSE)
+
+**Give your AI assistant deep understanding of any codebase.**
+
+Your AI assistant can only help with code it can see. repo-ctx gives it searchable access to any Git repository — with real symbol extraction, dependency graphs, and architecture analysis across 12+ languages. Set up in one command.
 
 ---
 
-## Overview
+## The Problem
 
-repo-ctx indexes documentation and analyzes code from Git repositories, making them searchable and accessible via MCP (for AI assistants), CLI, or Python API.
+AI coding assistants are powerful — but blind. They only know what's in the current file or what you paste in. When you need help understanding a dependency, navigating an unfamiliar codebase, or analyzing architecture across repositories, you're on your own.
 
-```mermaid
-flowchart LR
-    subgraph Sources
-        Local[Local Git]
-        GitHub[GitHub]
-        GitLab[GitLab]
-    end
+**repo-ctx solves this.** It indexes Git repositories and exposes them to AI assistants through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), giving tools like Claude Code, Cursor, and VS Code Copilot real, structured access to codebases.
 
-    subgraph repo-ctx
-        Indexer[Indexer]
-        Analyzer[Code Analyzer]
-        Storage[(SQLite)]
-    end
+---
 
-    subgraph Interfaces
-        MCP[MCP Server]
-        CLI[CLI]
-        API[Python API]
-    end
+## What Makes repo-ctx Different
 
-    Sources --> Indexer
-    Sources --> Analyzer
-    Indexer --> Storage
-    Analyzer --> Storage
-    Storage --> MCP
-    Storage --> CLI
-    Storage --> API
+### 1. Built for AI Assistants
+
+repo-ctx isn't a code browser you query manually. It's an MCP server — your AI assistant calls its tools directly when it needs to understand code.
+
+```
+You: "How does the authentication flow work in our API?"
+
+Claude (using repo-ctx):
+  → ctx-search "authentication" across 3 indexed repos
+  → ctx-analyze auth_service.py → extracts 12 symbols, 4 dependencies
+  → ctx-graph ./src/auth → maps the full dependency chain
+  → Gives you a complete, accurate answer
 ```
 
-### Key Features
+### 2. Multi-Repo, Multi-Provider
 
-| Feature | Description |
-|---------|-------------|
-| Multi-provider | GitHub, GitLab, and local Git repositories |
-| Documentation indexing | Full-text search across indexed repositories |
-| Code analysis | Symbol extraction for 12 languages |
-| Joern CPG | Advanced code property graph analysis (default) |
-| Tree-sitter | Fast fallback analysis |
-| Deep Code Analysis | Extracts docstrings and data flow dependencies |
-| MCP integration | Works with Claude Code, Cursor, VS Code Copilot |
+Index everything in one place. GitHub, GitLab, and local repositories — search across all of them.
 
-### Supported Languages
+```bash
+repo-ctx index ./my-project              # Local repo
+repo-ctx index fastapi/fastapi           # GitHub
+repo-ctx index my-company/backend        # GitLab
+repo-ctx index --group my-org            # Entire GitHub org
+```
 
-| Backend | Languages |
-|---------|-----------|
-| **Joern CPG** (default) | C, C++, Go, PHP, Ruby, Swift, C#, Python, Java, JavaScript, TypeScript, Kotlin |
-| **Tree-sitter** (fallback) | Python, Java, JavaScript, TypeScript, Kotlin, Smalltalk |
+Then your AI assistant can search, analyze, and cross-reference all of them simultaneously.
 
-Joern provides call graphs, data flow analysis, docstring extraction, and CPGQL queries. Tree-sitter is used when Joern is unavailable or explicitly requested. Smalltalk uses a custom parser for file-out format (Squeak/Pharo and VisualWorks dialects).
+### 3. Deep Code Understanding
+
+Not just text search — real structural analysis:
+
+- **Symbol extraction** — functions, classes, methods, interfaces across Python, Java, JavaScript, TypeScript, Kotlin, Go, Rust, C/C++, Ruby, PHP, C#, Bash
+- **Dependency graphs** — who calls what, import chains, coupling analysis
+- **Architecture analysis** — Design Structure Matrix, cycle detection, layer identification, complexity metrics
+- **Joern CPG** — optional deep analysis with call graphs, data flow tracking, and CPGQL queries
 
 ---
 
@@ -67,53 +65,20 @@ Joern provides call graphs, data flow analysis, docstring extraction, and CPGQL 
 pip install repo-ctx
 
 # Index a repository
-repo-ctx index /path/to/project          # Local
-repo-ctx index fastapi/fastapi           # GitHub
-repo-ctx index group/project             # GitLab
-repo-ctx index --group myorg             # All repos in org
+repo-ctx index fastapi/fastapi
 
-# Search and retrieve
-repo-ctx search "fastapi"                # Search indexed repos
-repo-ctx docs /fastapi/fastapi           # Get documentation
+# Search it
+repo-ctx search "middleware"
 
-# Analyze code
-repo-ctx analyze ./src                   # Extract symbols
-repo-ctx search "UserService" -s ./src   # Find symbols locally
-repo-ctx graph ./src                     # Dependency graph
-
-# Check system status
-repo-ctx status                          # Show capabilities
+# Analyze code locally
+repo-ctx analyze ./src --language python
 ```
-
-For AI assistant integration, see [MCP Setup](#mcp-setup) below.
-
----
-
-## Installation
-
-```bash
-# PyPI
-pip install repo-ctx
-
-# Or run without installing
-uvx repo-ctx --help
-```
-
-**Optional: Joern for extended analysis**
-
-```bash
-# Requires Java 19+
-curl -L "https://github.com/joernio/joern/releases/latest/download/joern-install.sh" | bash
-export PATH="$HOME/bin/joern:$PATH"
-```
-
-See [User Guide - Installation](docs/USER_GUIDE.md#installation) for detailed instructions.
 
 ---
 
 ## MCP Setup
 
-Add to your MCP configuration (e.g., `~/.config/claude/mcp.json`):
+Add to your MCP configuration (`~/.config/claude/mcp.json` for Claude Code):
 
 ```json
 {
@@ -129,43 +94,49 @@ Add to your MCP configuration (e.g., `~/.config/claude/mcp.json`):
 }
 ```
 
-No configuration needed for local repositories and public GitHub repos.
+Works immediately with local and public GitHub repos — no tokens required for those.
+
+For private repos: set `GITHUB_TOKEN` or `GITLAB_TOKEN` + `GITLAB_URL`.
+
+### 18 MCP Tools
+
+| Category | Tools |
+|----------|-------|
+| **Repository** | `ctx-index`, `ctx-list`, `ctx-search`, `ctx-docs` |
+| **Code Analysis** | `ctx-analyze`, `ctx-symbol`, `ctx-symbols`, `ctx-graph` |
+| **Architecture** | `ctx-dsm`, `ctx-cycles`, `ctx-layers`, `ctx-architecture`, `ctx-metrics` |
+| **Export** | `ctx-llmstxt`, `ctx-dump` |
+| **CPG (Joern)** | `ctx-query`, `ctx-export`, `ctx-status` |
+
+Full reference: [MCP Tools Reference](docs/mcp_tools_reference.md)
 
 ---
 
-## Configuration
+## Also Works As
 
-| Provider | Required Configuration |
-|----------|----------------------|
-| Local | None |
-| GitHub (public) | None (60 req/hour) |
-| GitHub (private) | `GITHUB_TOKEN` (5000 req/hour) |
-| GitLab | `GITLAB_URL` + `GITLAB_TOKEN` |
+**CLI** — standalone searching, indexing, and analysis from the terminal.
 
-```bash
-export GITHUB_TOKEN="ghp_your_token"
-export GITLAB_URL="https://gitlab.company.com"
-export GITLAB_TOKEN="glpat-your_token"
+**Python library** — embed repo-ctx in your own tools and workflows.
+
+```python
+from repo_ctx.client import RepoCtxClient
+
+async with RepoCtxClient() as client:
+    await client.index_repository("fastapi/fastapi", provider="github")
+    results = await client.search("middleware")
 ```
 
 ---
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| **[User Guide](docs/USER_GUIDE.md)** | Usage, examples, best practices |
-| **[Developer Guide](docs/DEV_GUIDE.md)** | Architecture, internals, contributing |
-| [MCP Tools Reference](docs/mcp_tools_reference.md) | Complete MCP tool documentation |
-
----
-
-## Project Status
-
-repo-ctx is actively developed. For planned features and roadmap, see [BACKLOG.md](docs/BACKLOG.md).
+- [User Guide](docs/user_guide.md) — usage, examples, configuration
+- [Developer Guide](docs/dev_guide.md) — architecture, contributing
+- [MCP Tools Reference](docs/mcp_tools_reference.md) — all 18 tools documented
+- [Architecture Analysis Guide](docs/architecture_analysis_guide.md) — DSM, cycles, metrics
 
 ---
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+Apache 2.0 — see [LICENSE](LICENSE).
