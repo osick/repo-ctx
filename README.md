@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/repo-ctx)](https://pypi.org/project/repo-ctx/)
 [![License](https://img.shields.io/github/license/osick/repo-ctx)](LICENSE)
 
-**Give your AI assistant deep understanding of any codebase.**
+## ***Give your AI assistant deep understanding of any codebase.***
 
 Your AI assistant can only help with code it can see. repo-ctx gives it searchable access to any Git repository — with real symbol extraction, dependency graphs, and architecture analysis across 12+ languages. Set up in one command.
 
