@@ -1,0 +1,73 @@
+[project]
+name = "repo-ctx"
+version = "0.8.0"
+description = "Git repository documentation indexer with MCP server, CLI, and library interfaces"
+readme = "docs/USER_GUIDE.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Oliver Sick"}
+]
+keywords = ["git", "gitlab", "github", "mcp", "documentation", "indexing", "context", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "mcp>=1.0.0",
+    "python-gitlab>=4.0.0",
+    "PyGithub>=2.1.0",
+    "GitPython>=3.1.40",
+    "markdown-it-py>=3.0.0",
+    "aiosqlite>=0.19.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.0.0",
+    "tree-sitter>=0.21.0",
+    "tree-sitter-python>=0.21.0",
+    "tree-sitter-javascript>=0.21.0",
+    "tree-sitter-typescript>=0.21.0",
+    "tree-sitter-java>=0.21.0",
+    "tree-sitter-kotlin>=0.3.0",
+    # Additional tree-sitter languages (previously Joern-only)
+    "tree-sitter-c>=0.21.0",
+    "tree-sitter-cpp>=0.21.0",
+    "tree-sitter-go>=0.21.0",
+    "tree-sitter-rust>=0.21.0",
+    "tree-sitter-ruby>=0.21.0",
+    "tree-sitter-php>=0.22.0",
+    "tree-sitter-c-sharp>=0.21.0",
+    "tree-sitter-bash>=0.21.0",
+    "networkx>=3.0",
+    "rich>=13.0.0",
+    "questionary>=2.0.0",
+    # API Server
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    # Vector/Graph DB
+    "qdrant-client>=1.7.0",
+    # LLM/Embedding support
+    "litellm>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/osick/repo-ctx"
+Repository = "https://github.com/osick/repo-ctx"
+Issues = "https://github.com/osick/repo-ctx/issues"
+
+[project.scripts]
+repo-ctx = "repo_ctx.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["repo_ctx"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

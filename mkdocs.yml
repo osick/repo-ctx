@@ -1,0 +1,67 @@
+site_name: repo-ctx
+site_description: Git repository documentation indexer and code analyzer
+site_url: https://repo-ctx.github.io/repo-ctx/
+
+repo_url: https://github.com/repo-ctx/repo-ctx
+repo_name: repo-ctx/repo-ctx
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+
+markdown_extensions:
+  - tables
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - User Guide:
+    - Getting Started: user_guide.md
+    - Configuration: configuration.md
+    - Testing Guide: testing_guide.md
+    - Multi-Provider Setup: multi-provider-guide.md
+  - MCP Tools:
+    - Tool Reference: mcp_tools_reference.md
+  - Code Analysis:
+    - Architecture Analysis: architecture_analysis_guide.md
+    - Refactoring Guide: refactoring_analysis_guide.md
+    - CPG Output Guide: cpg-output-guide.md
+  - Developer:
+    - Developer Guide: dev_guide.md
+    - Python API Reference: library/api-reference.md
+  - Release:
+    - Release Guide: release_guide.md
+    - PyPI Publishing: pypi_publishing.md
+    - GitHub Actions: github_actions.md
+
+exclude_docs: |
+  internal/

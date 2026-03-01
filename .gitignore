@@ -1,0 +1,64 @@
+# MkDocs
+site/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Configuration (may contain sensitive data)
+config.yaml
+
+# Database
+data/
+*.db
+*.sqlite
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Development
+#test_*.py
+check_db.py
+
+# Vibe workflow
+.vibe/
+docs/EXTENSIONS_ROADMAP.md
+.coverage
+docs/architecture/IMPLEMENTATION_PLAN_phase1.md
+docs/architecture/TEST_PLAN_phase1.md
+docs/PHASE1_PLANNING_SUMMARY.md
+docs/repo_ctx_extension_recommend.md
+notify.md
+mcp.json
+.mcp.json
+tests/test_tool_naming.py
+.VSCodeCounter/
+examples/joern-test-data/workspace/
+workspace/
+examples/joern-test-data/expected-output/
+examples/joern-test-data/*.png
+examples/popeye/
+docs/CLI_UX_REDESIGN.md
+notify-mcp.md
+.repo-ctx/
+
+GEMINI.md

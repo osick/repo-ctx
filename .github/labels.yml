@@ -1,0 +1,105 @@
+# Standard issue labels
+- name: bug
+  color: d73a4a
+  description: Something isn't working
+
+- name: enhancement
+  color: a2eeef
+  description: New feature or request
+
+- name: documentation
+  color: 0075ca
+  description: Improvements or additions to documentation
+
+- name: good first issue
+  color: 7057ff
+  description: Good for newcomers
+
+- name: help wanted
+  color: 008672
+  description: Extra attention is needed
+
+# Type labels
+- name: type:feature
+  color: 1d76db
+  description: New feature
+
+- name: type:bugfix
+  color: d73a4a
+  description: Bug fix
+
+- name: type:refactor
+  color: fbca04
+  description: Code refactoring
+
+- name: type:test
+  color: 0e8a16
+  description: Testing improvements
+
+- name: type:docs
+  color: 0075ca
+  description: Documentation changes
+
+- name: type:chore
+  color: fef2c0
+  description: Maintenance tasks
+
+# Priority labels
+- name: priority:critical
+  color: b60205
+  description: Critical priority
+
+- name: priority:high
+  color: d93f0b
+  description: High priority
+
+- name: priority:medium
+  color: fbca04
+  description: Medium priority
+
+- name: priority:low
+  color: 0e8a16
+  description: Low priority
+
+# Status labels
+- name: status:in-progress
+  color: f9d0c4
+  description: Work in progress
+
+- name: status:blocked
+  color: d93f0b
+  description: Blocked by another issue
+
+- name: status:needs-review
+  color: fbca04
+  description: Needs review
+
+- name: status:ready
+  color: 0e8a16
+  description: Ready to be worked on
+
+# Component labels
+- name: component:mcp-server
+  color: 1d76db
+  description: MCP server component
+
+- name: component:cli
+  color: 1d76db
+  description: CLI component
+
+- name: component:core
+  color: 1d76db
+  description: Core library
+
+- name: component:docs
+  color: 0075ca
+  description: Documentation
+
+# Release labels (auto-generated)
+- name: released-v0.1.0
+  color: ededed
+  description: Released in v0.1.0
+
+- name: released-v0.1.1
+  color: ededed
+  description: Released in v0.1.1
