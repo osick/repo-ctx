@@ -161,29 +161,41 @@ class TestSearchService:
             repository_id="/test/repo",
         )
 
-        assert results == []
+        # semantic_search returns a dict with query, documents, symbols, chunks
+        assert isinstance(results, dict)
+        assert results["query"] == "test query"
+        assert results["documents"] == []
+        assert results["symbols"] == []
+        assert results["chunks"] == []
 
     @pytest.mark.asyncio
     async def test_semantic_search_with_vector_storage(
         self, service_context, mock_vector_storage
     ):
-        """Test semantic search with vector storage."""
-        mock_vector_storage.search_similar = AsyncMock(return_value=[
-            SimilarityResult(
-                id="doc_1",
-                score=0.95,
-                payload={"file_path": "README.md", "library_id": "/test/repo"},
-            ),
+        """Test semantic search with vector storage and embedding service."""
+        mock_embedding_service = AsyncMock()
+        mock_embedding_service.search_similar_documents = AsyncMock(return_value=[
+            {
+                "id": "doc_1",
+                "score": 0.95,
+                "file_path": "README.md",
+                "library_id": "/test/repo",
+            },
         ])
+        mock_embedding_service.search_similar_symbols = AsyncMock(return_value=[])
+        mock_embedding_service.search_similar_chunks = AsyncMock(return_value=[])
 
-        service = SearchService(service_context)
+        service = SearchService(service_context, embedding_service=mock_embedding_service)
         results = await service.semantic_search(
             query="test query",
             repository_id="/test/repo",
         )
 
-        assert len(results) == 1
-        assert results[0]["score"] == 0.95
+        # semantic_search returns a dict with query, documents, symbols, chunks
+        assert isinstance(results, dict)
+        assert results["query"] == "test query"
+        assert len(results["documents"]) == 1
+        assert results["documents"][0]["score"] == 0.95
 
     @pytest.mark.asyncio
     async def test_get_symbol_detail(self, service_context, mock_content_storage):
