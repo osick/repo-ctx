@@ -21,8 +21,6 @@ from typing import Optional
 from repo_ctx.analysis.models import Symbol
 from repo_ctx.analysis.smalltalk import (
     create_extractor,
-    StandardSmalltalkExtractor,
-    CincomSmalltalkExtractor,
     BaseSmalltalkExtractor,
     FileOutParser,
 )

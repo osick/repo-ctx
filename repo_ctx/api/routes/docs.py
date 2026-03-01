@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 
 from repo_ctx.services.base import ServiceContext
 from repo_ctx.services.search import SearchService
-from repo_ctx.models import OutputMode
 
 
 class DocumentInfo(BaseModel):
@@ -52,7 +51,7 @@ def create_docs_router(context: ServiceContext) -> APIRouter:
         Configured APIRouter.
     """
     router = APIRouter(tags=["documentation"])
-    search_service = SearchService(context)
+    _search_service = SearchService(context)
 
     @router.get("/docs/{group}/{project}")
     async def get_documentation(

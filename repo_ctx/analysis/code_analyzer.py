@@ -9,11 +9,6 @@ from .javascript_extractor import JavaScriptExtractor
 from .java_extractor import JavaExtractor
 from .kotlin_extractor import KotlinExtractor
 from .smalltalk_extractor import SmalltalkExtractor
-from .smalltalk import (
-    StandardSmalltalkExtractor,
-    CincomSmalltalkExtractor,
-    create_extractor as create_smalltalk_extractor,
-)
 from .generic_extractor import GenericExtractor, create_generic_extractor
 
 logger = logging.getLogger(__name__)

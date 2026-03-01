@@ -5,7 +5,7 @@ Uses language-specific node type mappings to extract symbols uniformly.
 """
 import logging
 from tree_sitter import Language, Parser, Node
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Optional
 from .models import Symbol, SymbolType, Dependency
 
 logger = logging.getLogger(__name__)

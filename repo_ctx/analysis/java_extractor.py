@@ -2,7 +2,7 @@
 import tree_sitter_java as tsjava
 from tree_sitter import Language, Parser, Node
 from typing import List, Dict, Any, Optional
-from .models import Symbol, SymbolType, Dependency
+from .models import Symbol, SymbolType
 
 
 class JavaExtractor:

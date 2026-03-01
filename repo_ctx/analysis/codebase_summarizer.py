@@ -653,7 +653,7 @@ class CodebaseSummarizer:
             new_content = "\n".join(new_lines)
 
             llms_txt_path.write_text(new_content, encoding="utf-8")
-            logger.info(f"Updated llms.txt with business summary")
+            logger.info("Updated llms.txt with business summary")
             return True
 
         except Exception as e:

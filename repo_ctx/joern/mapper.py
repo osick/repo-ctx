@@ -587,7 +587,7 @@ class CPGMapper:
         Uses heuristics based on naming patterns and language conventions.
         """
         name = cpg_type.name
-        full_name = cpg_type.full_name or name
+        _full_name = cpg_type.full_name or name
 
         # Interface detection
         if language in ("java", "kotlin", "typescript", "csharp"):

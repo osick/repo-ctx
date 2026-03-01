@@ -4,7 +4,7 @@ This module provides MCPContext which wraps the service layer
 and provides convenient access to all services for MCP tool handlers.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from repo_ctx.services.base import ServiceContext
 from repo_ctx.services.repository import RepositoryService

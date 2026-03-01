@@ -52,5 +52,5 @@ class GitLabClient:
         try:
             content = self.read_file(project, "git_context.json", ref)
             return json.loads(content)
-        except:
+        except Exception:
             return None

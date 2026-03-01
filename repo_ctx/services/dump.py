@@ -19,8 +19,6 @@ from repo_ctx import __version__
 from repo_ctx.services.base import BaseService, ServiceContext
 from repo_ctx.progress import (
     ProgressCallback,
-    ProgressReporter,
-    NoOpProgressCallback,
     ProgressPhase,
 )
 
@@ -1915,7 +1913,7 @@ Respond in Markdown format, keep it under 500 words. Focus on WHAT the project d
         try:
             from ..analysis.interactive_graph import InteractiveGraphGenerator
             html_generator = InteractiveGraphGenerator()
-            html_path = html_generator.generate_from_arch_data(
+            _html_path = html_generator.generate_from_arch_data(
                 arch_data,
                 output_dir / "dependencies.html",
                 title=f"{output_dir.parent.name} - Dependency Graph",
@@ -1961,15 +1959,15 @@ Respond in Markdown format, keep it under 500 words. Focus on WHAT the project d
 
         lines.append("## Summary")
         lines.append("")
-        lines.append(f"| Metric | Value |")
-        lines.append(f"|--------|-------|")
+        lines.append("| Metric | Value |")
+        lines.append("|--------|-------|")
         lines.append(f"| Files | {len(nodes)} |")
         lines.append(f"| Dependencies | {len(edges)} |")
         lines.append(f"| Cycles | {cycles_count} |")
         if layers.get("is_acyclic"):
             lines.append(f"| Layers | {layers.get('count', 0)} |")
         else:
-            lines.append(f"| Layers | N/A (has cycles) |")
+            lines.append("| Layers | N/A (has cycles) |")
         lines.append("")
 
         # Dependency graph (mermaid) - limited to top nodes for readability
@@ -2079,7 +2077,7 @@ Respond in Markdown format, keep it under 500 words. Focus on WHAT the project d
                 matrix = dsm_data.get("matrix", [])
                 if labels and matrix:
                     # Create ASCII DSM
-                    max_label_len = max(len(l) for l in labels) if labels else 0
+                    max_label_len = max(len(lbl) for lbl in labels) if labels else 0
                     lines.append("```")
                     # Header row
                     header = " " * (max_label_len + 2)
@@ -2114,7 +2112,7 @@ Respond in Markdown format, keep it under 500 words. Focus on WHAT the project d
                 # Check if diagram is too large (simple line count heuristic)
                 mermaid_lines = class_mermaid.split('\n')
                 if len(mermaid_lines) > 50:
-                    lines.append(f"*Diagram limited for readability. See `class_dependencies.mmd` for full view.*")
+                    lines.append("*Diagram limited for readability. See `class_dependencies.mmd` for full view.*")
                     lines.append("")
                     # Show truncated version
                     lines.append("```mermaid")
@@ -2141,7 +2139,7 @@ Respond in Markdown format, keep it under 500 words. Focus on WHAT the project d
             # Class coupling metrics
             if class_coupling:
                 problems = class_coupling.get("problems", {})
-                aggregates = class_coupling.get("aggregates", {})
+                _aggregates = class_coupling.get("aggregates", {})
 
                 if problems.get("god_classes", 0) > 0 or problems.get("unstable_cores", 0) > 0:
                     lines.append("### Coupling Problems")
@@ -2189,7 +2187,7 @@ Respond in Markdown format, keep it under 500 words. Focus on WHAT the project d
                 # Check if diagram is too large
                 mermaid_lines = pkg_mermaid.split('\n')
                 if len(mermaid_lines) > 50:
-                    lines.append(f"*Diagram limited for readability. See `package_dependencies.mmd` for full view.*")
+                    lines.append("*Diagram limited for readability. See `package_dependencies.mmd` for full view.*")
                     lines.append("")
                     lines.append("```mermaid")
                     lines.append('\n'.join(mermaid_lines[:50]))

@@ -1,5 +1,4 @@
 """GitHub provider implementation."""
-import base64
 import json
 from typing import Optional, List
 from github import Github, GithubException, UnknownObjectException, BadCredentialsException
@@ -89,7 +88,7 @@ class GitHubProvider(GitProvider):
             elif e.status == 403:
                 # Could be rate limit or permissions
                 if "rate limit" in str(e).lower():
-                    raise ProviderRateLimitError(f"GitHub rate limit exceeded")
+                    raise ProviderRateLimitError("GitHub rate limit exceeded")
                 raise ProviderAuthError(f"Access denied to repository: {path}")
             else:
                 raise ProviderError(f"Error getting GitHub repository {path}: {e}")

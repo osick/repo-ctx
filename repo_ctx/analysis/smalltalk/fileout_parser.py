@@ -136,7 +136,7 @@ class FileOutParser:
             List of parsed Chunk objects
         """
         chunks = []
-        line_number = 1
+        _line_number = 1
 
         for raw_chunk, chunk_line in self._split_chunks(code):
             chunk = self._parse_chunk(raw_chunk, chunk_line)

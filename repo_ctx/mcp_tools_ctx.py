@@ -12,11 +12,11 @@ These tools use unified parameters and auto-detection of targets
 import json
 import os
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 
 from mcp.types import Tool, TextContent
 
-from .cli.target import detect_target, TargetType
+from .cli.target import detect_target
 
 
 def _collect_files(analyzer, path_obj: Path) -> dict:
@@ -537,7 +537,6 @@ async def handle_ctx_tool(name: str, arguments: dict, context) -> Optional[List[
     # ctx-index
     # =========================================================================
     if name == "ctx-index":
-        from .progress import PrintProgressCallback
 
         repository = arguments["repository"]
         provider = arguments.get("provider", "auto")
@@ -1625,7 +1624,7 @@ async def handle_ctx_tool(name: str, arguments: dict, context) -> Optional[List[
 
             output = []
             if result.success:
-                output.append(f"Repository Context Dump Created\n\n")
+                output.append("Repository Context Dump Created\n\n")
                 output.append(f"Output: {result.output_path}\n")
                 output.append(f"Level: {result.level.value}\n\n")
 
@@ -1636,7 +1635,7 @@ async def handle_ctx_tool(name: str, arguments: dict, context) -> Optional[List[
                     output.append(f"- ... and {len(result.files_created) - 20} more\n")
 
                 if result.metadata:
-                    output.append(f"\nAnalysis Summary\n\n")
+                    output.append("\nAnalysis Summary\n\n")
                     stats = result.metadata.stats
                     output.append(f"- Symbols extracted: {stats.get('symbols_extracted', 0)}\n")
                     output.append(f"- Files analyzed: {stats.get('files_analyzed', 0)}\n")

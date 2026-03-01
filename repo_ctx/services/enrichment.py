@@ -14,10 +14,9 @@ from repo_ctx.services.base import BaseService, ServiceContext
 from repo_ctx.services.llm import (
     LLMService,
     CodeSummary,
-    CodeClassification,
     CODE_CATEGORIES,
 )
-from repo_ctx.services.chunking import ChunkingService, Chunk, ChunkType
+from repo_ctx.services.chunking import ChunkingService, Chunk
 
 logger = logging.getLogger("repo_ctx.services.enrichment")
 
@@ -532,7 +531,7 @@ class EnrichmentService(BaseService):
             score -= 0.1
 
         # Penalize no comments
-        comment_lines = len([l for l in lines if l.strip().startswith("#")])
+        comment_lines = len([line for line in lines if line.strip().startswith("#")])
         if comment_lines < len(lines) * 0.05:
             score -= 0.05
 

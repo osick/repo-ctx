@@ -5,7 +5,7 @@ ServiceContext for dependency injection and BaseService as
 the parent class for all services.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from repo_ctx.storage.protocols import (
@@ -39,7 +39,7 @@ class ServiceContext:
             Dictionary with health status of each storage and overall status.
         """
         health: dict[str, Any] = {}
-        all_healthy = True
+        _all_healthy = True
 
         # Check content storage (required)
         try:
@@ -48,10 +48,10 @@ class ServiceContext:
                 "status": "healthy" if content_healthy else "unhealthy",
             }
             if not content_healthy:
-                all_healthy = False
+                _all_healthy = False
         except Exception as e:
             health["content_storage"] = {"status": "unhealthy", "error": str(e)}
-            all_healthy = False
+            _all_healthy = False
 
         # Check vector storage (optional)
         if self.vector_storage is not None:
@@ -61,10 +61,10 @@ class ServiceContext:
                     "status": "healthy" if vector_healthy else "unhealthy",
                 }
                 if not vector_healthy:
-                    all_healthy = False
+                    _all_healthy = False
             except Exception as e:
                 health["vector_storage"] = {"status": "unhealthy", "error": str(e)}
-                all_healthy = False
+                _all_healthy = False
         else:
             health["vector_storage"] = {"status": "not_configured"}
 
@@ -76,10 +76,10 @@ class ServiceContext:
                     "status": "healthy" if graph_healthy else "unhealthy",
                 }
                 if not graph_healthy:
-                    all_healthy = False
+                    _all_healthy = False
             except Exception as e:
                 health["graph_storage"] = {"status": "unhealthy", "error": str(e)}
-                all_healthy = False
+                _all_healthy = False
         else:
             health["graph_storage"] = {"status": "not_configured"}
 

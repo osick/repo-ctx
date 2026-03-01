@@ -1,10 +1,8 @@
 """Interactive command palette mode."""
 
-import sys
 import os
-import json
 import asyncio
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 
 import questionary
 from questionary import Style
@@ -18,10 +16,6 @@ from rich import box
 from .. import __version__
 from ..operations import (
     parse_repo_id,
-    is_local_path,
-    clone_repo_to_temp,
-    analyze_local_directory,
-    get_clone_url,
     get_or_analyze_repo_standalone,
 )
 
@@ -516,7 +510,7 @@ async def execute_code_analyze():
             return
 
     if not files:
-        console.print(f"[yellow]No supported source files found[/yellow]")
+        console.print("[yellow]No supported source files found[/yellow]")
         return
 
     # Analyze
@@ -691,7 +685,7 @@ async def execute_code_find():
             return
 
         if not files:
-            console.print(f"[yellow]No supported source files found[/yellow]")
+            console.print("[yellow]No supported source files found[/yellow]")
             return
 
         # Analyze and search
@@ -866,7 +860,7 @@ async def execute_code_info():
                                 continue
 
             if not files:
-                console.print(f"[yellow]No supported source files found[/yellow]")
+                console.print("[yellow]No supported source files found[/yellow]")
                 return
 
             results = analyzer.analyze_files(files)
@@ -1017,7 +1011,7 @@ async def execute_code_symbols():
             language = analyzer.detect_language(str(path_obj))
 
             if not language:
-                console.print(f"[red]Error: Unsupported file type[/red]")
+                console.print("[red]Error: Unsupported file type[/red]")
                 return
 
             with open(path_obj, 'r', encoding='utf-8') as f:
@@ -1028,7 +1022,7 @@ async def execute_code_symbols():
             return
 
     if not code:
-        console.print(f"[yellow]No content to analyze[/yellow]")
+        console.print("[yellow]No content to analyze[/yellow]")
         return
 
     # Analyze

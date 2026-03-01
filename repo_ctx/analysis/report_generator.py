@@ -537,7 +537,7 @@ class CodeAnalysisReport:
 
         # Add summary row for transpiled TypeScript/JavaScript symbols if any
         if temp_file_count > 0:
-            total = sum(temp_file_counts.values())
+            _total = sum(temp_file_counts.values())
             lines.append(f"| *(transpiled JS/TS)* | {temp_file_counts['classes']} | {temp_file_counts['functions']} | {temp_file_counts['methods']} | {temp_file_counts['interfaces']} | {temp_file_counts['enums']} |")
 
         lines.append("")
@@ -602,12 +602,12 @@ class CodeAnalysisReport:
 
             if cls.symbol_type == SymbolType.INTERFACE:
                 lines.append(f"    class {class_name} {{")
-                lines.append(f"        <<interface>>")
-                lines.append(f"    }}")
+                lines.append("        <<interface>>")
+                lines.append("    }")
             elif cls.symbol_type == SymbolType.ENUM:
                 lines.append(f"    class {class_name} {{")
-                lines.append(f"        <<enumeration>>")
-                lines.append(f"    }}")
+                lines.append("        <<enumeration>>")
+                lines.append("    }")
             else:
                 # For regular classes, show key methods if any
                 methods = [s for s in self.symbols
@@ -623,7 +623,7 @@ class CodeAnalysisReport:
                         lines.append(f"        +{method.name}()")
                     if len(methods) > 5:
                         lines.append(f"        +... {len(methods) - 5} more")
-                    lines.append(f"    }}")
+                    lines.append("    }")
                 else:
                     # Still define the class even without methods
                     lines.append(f"    class {class_name}")

@@ -5,7 +5,6 @@ by CLI, MCP, and other integrations. It supports both direct service
 access and HTTP API access.
 """
 
-import asyncio
 import logging
 from enum import Enum
 from typing import Any, Callable, Optional
@@ -13,7 +12,6 @@ from typing import Any, Callable, Optional
 from repo_ctx.config import Config
 from repo_ctx.client.models import (
     Library,
-    Document,
     Symbol,
     SearchResult,
     IndexResult,
@@ -510,7 +508,6 @@ class RepoCtxClient:
 
         if self._mode == ClientMode.DIRECT:
             # Search in indexed repository or local path
-            from repo_ctx.analysis import CodeAnalyzer
 
             # This is a simplified implementation
             # Full implementation would search in storage
@@ -553,10 +550,9 @@ class RepoCtxClient:
 
         if self._mode == ClientMode.DIRECT:
             # Direct mode implementation
-            from repo_ctx.analysis import CodeAnalyzer
-            from repo_ctx.analysis.dependency_graph import DependencyGraph, GraphType
+            from repo_ctx.analysis.dependency_graph import GraphType
 
-            graph_type_map = {
+            _graph_type_map = {
                 "file": GraphType.FILE,
                 "module": GraphType.MODULE,
                 "class": GraphType.CLASS,

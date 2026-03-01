@@ -7,12 +7,11 @@ Provides Structure101-style complexity measurement including:
 - Metrics comparison over time
 - Coupling metrics (Ca, Ce, Instability, Abstractness)
 """
-import json
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, Set
 from collections import defaultdict
 
-from .dependency_graph import DependencyGraphResult, GraphNode, GraphEdge
+from .dependency_graph import DependencyGraphResult
 
 
 @dataclass
@@ -739,7 +738,6 @@ class CouplingAnalyzer:
 
     def _get_package_from_path(self, file_path: str) -> str:
         """Extract package name from file path."""
-        import os
         parts = file_path.replace("\\", "/").split("/")
         # Remove filename, keep directory
         if parts:

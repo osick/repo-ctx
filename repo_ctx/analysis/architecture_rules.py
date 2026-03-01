@@ -5,14 +5,12 @@ Provides Structure101-style architecture analysis including:
 - Architecture rule definition (YAML-based DSL)
 - Rule enforcement and violation detection
 """
-import json
-import re
 import fnmatch
 from dataclasses import dataclass, field
-from typing import List, Dict, Set, Optional, Any, Tuple
+from typing import List, Dict, Set, Optional, Any
 from collections import defaultdict
 
-from .dependency_graph import DependencyGraphResult, GraphNode, GraphEdge
+from .dependency_graph import DependencyGraphResult
 from .architecture import CycleDetector
 
 
@@ -541,7 +539,7 @@ def analyze_with_rules(
         violations = rules.check(graph)
 
     return {
-        "layers": [l.to_dict() for l in layers],
+        "layers": [layer.to_dict() for layer in layers],
         "violations": [v.to_dict() for v in violations],
         "summary": {
             "layer_count": len(layers),

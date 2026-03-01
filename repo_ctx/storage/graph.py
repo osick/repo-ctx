@@ -10,7 +10,6 @@ from typing import Any, Optional
 import re
 
 from repo_ctx.storage.protocols import (
-    GraphStorageProtocol,
     GraphNode,
     GraphRelationship,
     GraphResult,
@@ -307,8 +306,8 @@ class GraphStorage:
 
             for u, v, data in self._graph.edges(data=True):
                 if data.get("type") == rel_type:
-                    u_data = self._graph.nodes[u]
-                    v_data = self._graph.nodes[v]
+                    _u_data = self._graph.nodes[u]
+                    _v_data = self._graph.nodes[v]
                     result = {
                         "from": u,
                         "to": v,
@@ -373,7 +372,7 @@ class GraphStorage:
         multi_label_match = re.search(r"MATCH\s*\(n((?::\w+)+)\)\s*RETURN\s+n\.id\s+as\s+id", cypher, re.IGNORECASE)
         if multi_label_match:
             labels_str = multi_label_match.group(1)
-            required_labels = [l for l in labels_str.split(":") if l]
+            required_labels = [lbl for lbl in labels_str.split(":") if lbl]
             results = []
             for node_id, data in self._graph.nodes(data=True):
                 node_labels = data.get("labels", [])
@@ -476,7 +475,6 @@ class GraphStorage:
         self, symbol_name: str, depth: int, direction: str
     ) -> GraphResult:
         """Get call graph from in-memory NetworkX graph."""
-        import networkx as nx
 
         # Find the start node
         start_node = None

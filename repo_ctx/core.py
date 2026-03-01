@@ -1,7 +1,7 @@
 """Core business logic."""
 import shutil
 import logging
-from typing import Optional, Dict, List
+from typing import Optional, Dict
 from .config import Config
 from .storage import Storage
 from .parser import Parser
@@ -10,12 +10,11 @@ from .providers import (
     GitProvider,
     ProviderFactory,
     ProviderDetector,
-    ProviderProject,
-    ProviderNotFoundError
+    ProviderProject
 )
-from .progress import ProgressCallback, ProgressReporter, ProgressPhase
+from .progress import ProgressCallback, ProgressReporter
 from .operations import clone_repo_to_temp, get_clone_url, analyze_local_directory
-from .analysis import CodeAnalyzer, Symbol
+from .analysis import CodeAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +195,7 @@ class RepositoryContext:
             for lib in libraries:
                 # Detect provider from library ID format
                 library_id = f"/{lib.group_name}/{lib.project_name}"
-                detected = ProviderDetector.detect(library_id)
+                _detected = ProviderDetector.detect(library_id)
 
                 # For stored libraries, we need to check the path format
                 # Local: starts with / and is a file path
@@ -392,7 +391,7 @@ class RepositoryContext:
 
             # Add truncation footer if there are more documents
             if truncated_docs:
-                remaining_tokens = max_tokens - total_tokens
+                _remaining_tokens = max_tokens - total_tokens
                 truncation_footer = f"\n\n---\n**... and {len(truncated_docs)} more document(s) available**\n"
 
                 # Show headers of top truncated documents (up to 5)
@@ -514,7 +513,7 @@ class RepositoryContext:
         description = config.get("description", proj.description) if config else proj.description
 
         # Save library with provider URI format
-        library_id_uri = ProviderDetector.to_library_id(project_path, provider_type)
+        _library_id_uri = ProviderDetector.to_library_id(project_path, provider_type)
 
         library = Library(
             group_name=group,
@@ -774,7 +773,7 @@ class RepositoryContext:
             await self.storage.save_symbols(symbols, library_id)
 
             await reporter.update(
-                message=f"Code analysis complete",
+                message="Code analysis complete",
                 detail=f"{len(symbols)} symbols extracted"
             )
             return len(symbols)

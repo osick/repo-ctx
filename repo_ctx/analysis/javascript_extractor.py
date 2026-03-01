@@ -3,7 +3,7 @@ import tree_sitter_javascript as tsjavascript
 import tree_sitter_typescript as tstypescript
 from tree_sitter import Language, Parser, Node
 from typing import List, Dict, Any, Optional
-from .models import Symbol, SymbolType, Dependency
+from .models import Symbol, SymbolType
 
 
 class JavaScriptExtractor:
@@ -115,7 +115,7 @@ class JavaScriptExtractor:
 
         parameters_node = node.child_by_field_name("parameters")
         return_type_node = node.child_by_field_name("return_type")
-        body_node = node.child_by_field_name("body")
+        _body_node = node.child_by_field_name("body")
 
         # Build signature
         params = self._get_node_text(parameters_node) if parameters_node else "()"

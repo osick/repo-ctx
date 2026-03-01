@@ -456,7 +456,7 @@ class AnalysisService(BaseService):
                 "id": n.id,
                 "name": n.properties.get("name"),
                 "qualified_name": n.properties.get("qualified_name"),
-                "symbol_type": [l for l in n.labels if l not in ("Symbol", "PublicAPI")],
+                "symbol_type": [lbl for lbl in n.labels if lbl not in ("Symbol", "PublicAPI")],
                 "file_path": n.properties.get("file_path"),
                 "signature": n.properties.get("signature"),
             }

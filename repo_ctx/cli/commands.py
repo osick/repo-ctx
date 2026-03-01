@@ -5,7 +5,6 @@ import sys
 import json
 import asyncio
 from pathlib import Path
-from typing import Any, Optional, List, Tuple
 
 from rich.console import Console
 from rich.table import Table
@@ -17,13 +16,8 @@ from ..models import OutputMode
 from ..progress import PrintProgressCallback
 from ..operations import (
     parse_repo_id,
-    is_local_path,
-    clone_repo_to_temp,
-    analyze_local_directory,
-    get_clone_url,
     parse_include_options,
     get_or_analyze_repo_standalone,
-    VALID_INCLUDE_OPTIONS,
 )
 
 console = Console()
@@ -708,7 +702,7 @@ async def code_find(args):
     try:
         analyzer = CodeAnalyzer()
         all_symbols = []
-        source_info = args.path
+        _source_info = args.path
 
         # Check if using indexed repo
         if getattr(args, 'repo', False):
@@ -729,7 +723,7 @@ async def code_find(args):
                 return
 
             all_symbols = symbols
-            source_info = f"{args.path} (indexed)"
+            _source_info = f"{args.path} (indexed)"
 
         else:
             # Use local path
@@ -760,7 +754,7 @@ async def code_find(args):
                                 continue
 
             if not files:
-                console.print(f"[yellow]No supported files found[/yellow]")
+                console.print("[yellow]No supported files found[/yellow]")
                 return
 
             # Analyze and search
@@ -879,7 +873,7 @@ async def code_info(args):
                                 continue
 
             if not files:
-                console.print(f"[yellow]No supported files found[/yellow]")
+                console.print("[yellow]No supported files found[/yellow]")
                 return
 
             # Analyze and find
@@ -962,7 +956,7 @@ def code_symbols(args):
         language = analyzer.detect_language(str(path_obj))
 
         if not language:
-            console.print(f"[red]Error: Unsupported file type[/red]")
+            console.print("[red]Error: Unsupported file type[/red]")
             sys.exit(1)
 
         with open(path_obj, 'r', encoding='utf-8') as f:

@@ -23,8 +23,6 @@ from repo_ctx.analysis.smalltalk.base import BaseSmalltalkExtractor
 from repo_ctx.analysis.smalltalk.fileout_parser import (
     ClassDefinition,
     MethodDefinition,
-    Chunk,
-    ChunkType,
 )
 
 
@@ -257,7 +255,7 @@ class CincomSmalltalkExtractor(BaseSmalltalkExtractor):
             namespace_refs = self._extract_namespace_references(method_def.source)
             for ref in namespace_refs:
                 # Skip if it's a known class reference
-                class_name = ref.split(".")[-1] if "." in ref else ref
+                _class_name = ref.split(".")[-1] if "." in ref else ref
                 dependencies.append({
                     "from": f"{method_def.class_name}>>{method_def.selector}",
                     "to": ref,

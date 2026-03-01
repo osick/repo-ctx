@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 from repo_ctx.models import Library, Version, Document
-from repo_ctx.storage.protocols import ContentStorageProtocol
 
 
 class ContentStorage:

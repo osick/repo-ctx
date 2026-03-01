@@ -3,7 +3,6 @@
 import sys
 import argparse
 import asyncio
-from typing import Optional
 
 from rich.console import Console
 
@@ -130,7 +129,7 @@ Run 'repo-ctx <command> --help' for command details.
                             help="Skip code analysis (only index documentation)")
 
     # list - List indexed repositories
-    flat_list = subparsers.add_parser(
+    _flat_list = subparsers.add_parser(
         "list",
         help="List indexed repositories",
         description="List all indexed repositories"
@@ -239,7 +238,7 @@ Run 'repo-ctx <command> --help' for command details.
                              help="Export format (default: dot)")
 
     # status - System status
-    flat_status = subparsers.add_parser(
+    _flat_status = subparsers.add_parser(
         "status",
         help="Show system status and capabilities",
         description="Display Joern availability and supported languages"
@@ -424,7 +423,7 @@ Run 'repo-ctx <command> --help' for command details.
                                    help="Exclude subgroups (GitLab only)")
 
     # repo list
-    repo_list = repo_subparsers.add_parser(
+    _repo_list = repo_subparsers.add_parser(
         "list",
         help="List all indexed repositories",
         description="List all indexed repositories"

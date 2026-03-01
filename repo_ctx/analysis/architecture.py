@@ -8,10 +8,10 @@ Provides Structure101-style architecture analysis including:
 """
 import json
 from dataclasses import dataclass, field
-from typing import List, Dict, Set, Optional, Tuple, Any
+from typing import List, Dict, Set, Any
 from collections import defaultdict
 
-from .dependency_graph import DependencyGraphResult, GraphNode, GraphEdge
+from .dependency_graph import DependencyGraphResult, GraphEdge
 
 
 @dataclass
@@ -96,7 +96,7 @@ class DSMResult:
         ]
 
         # Calculate column width
-        col_width = max(3, max(len(l) for l in labels) if labels else 3)
+        col_width = max(3, max(len(label) for label in labels) if labels else 3)
 
         lines = []
 
@@ -289,7 +289,7 @@ class CycleDetector:
         3. Are not inheritance relationships
         """
         suggestions = []
-        node_set = set(nodes)
+        _node_set = set(nodes)
 
         # Calculate fan-in for each node
         fan_in: Dict[str, int] = defaultdict(int)

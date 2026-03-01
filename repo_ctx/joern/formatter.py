@@ -302,7 +302,7 @@ class CPGFormatter:
         parts = []
 
         # Header
-        parts.append(f"# Code Analysis Report")
+        parts.append("# Code Analysis Report")
         parts.append("")
         if source_path:
             parts.append(f"**Source:** `{source_path}`")

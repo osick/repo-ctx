@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from repo_ctx.services.progress import get_progress_registry, ProgressTracker
+from repo_ctx.services.progress import get_progress_registry
 
 
 class CreateTaskRequest(BaseModel):

@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import tempfile
 from typing import Tuple, Optional, Dict, List, Any
-from pathlib import Path
 
 
 # Valid include options for documentation retrieval

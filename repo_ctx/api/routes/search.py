@@ -3,9 +3,9 @@
 This module provides endpoints for search operations.
 """
 
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
 from repo_ctx.services.base import ServiceContext

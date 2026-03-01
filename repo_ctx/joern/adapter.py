@@ -10,11 +10,10 @@ import logging
 import os
 import tempfile
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from repo_ctx.analysis.models import Symbol, Dependency
-from repo_ctx.joern.cli import JoernCLI, JoernError, JoernNotFoundError
+from repo_ctx.joern.cli import JoernCLI, JoernError
 from repo_ctx.joern.parser import CPGParser
 from repo_ctx.joern.mapper import CPGMapper
 from repo_ctx.joern import queries

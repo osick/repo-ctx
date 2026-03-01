@@ -6,7 +6,6 @@ vector embeddings for semantic search capabilities.
 
 from typing import Any, Optional
 import uuid
-import hashlib
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -20,7 +19,6 @@ from qdrant_client.models import (
 )
 
 from repo_ctx.storage.protocols import (
-    VectorStorageProtocol,
     Embedding,
     SimilarityResult,
 )

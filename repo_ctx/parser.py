@@ -821,7 +821,7 @@ class Parser:
             if len(doc.content.strip()) < 10:
                 continue
 
-            title = self.extract_title(doc.content, doc.file_path)
+            _title = self.extract_title(doc.content, doc.file_path)
             full_content = self.extract_full_content(doc.content)
 
             output.append(f"# {doc.file_path}\n\n")

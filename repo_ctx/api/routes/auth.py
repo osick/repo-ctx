@@ -3,7 +3,7 @@
 This module provides endpoints for authentication management.
 """
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from repo_ctx.api.auth import (

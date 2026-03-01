@@ -153,7 +153,7 @@ def create_tasks_router(context: ServiceContext) -> APIRouter:
             while True:
                 task = _tasks.get(task_id)
                 if not task:
-                    yield f"event: error\ndata: Task not found\n\n"
+                    yield "event: error\ndata: Task not found\n\n"
                     break
 
                 current_progress = task.get("progress", 0.0)
